@@ -4,7 +4,7 @@
 
 ## 仓库名称
 
-`tuiyanju-dynamic-cognitive-orchestrator`
+`tuiyanju`
 
 ## 仓库简介（About）
 
