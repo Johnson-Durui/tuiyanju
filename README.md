@@ -6,7 +6,7 @@
 
 推演局不会直接给你一个平面的答案，而是先拆议题、再动态选角、让多个互相隔离的 Agent 进入暗房独白，在需要时开启圆桌激辩，最后由“局长”把碎片拼成一份结构化真相报告。
 
-![推演局演示封面](docs/demo/github-smartest-report-cover.png)
+![推演局 30 秒结论页演示](docs/demo/github-smartest-report-summary.png)
 
 ## 这是什么
 
@@ -79,6 +79,7 @@
 当前仓库已经附带一份真实导出的演示报告：
 
 - [《github 上的人是否是最聪明的》完整 PDF](docs/demo/github-smartest-report.pdf)
+- [30 秒结论页预览图](docs/demo/github-smartest-report-summary.png)
 
 这个样例适合直接拿来展示：
 

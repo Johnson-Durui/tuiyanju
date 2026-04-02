@@ -43,6 +43,7 @@
 ## 演示样例
 
 - [github-smartest-report.pdf](demo/github-smartest-report.pdf)
+- [github-smartest-report-summary.png](demo/github-smartest-report-summary.png)
 - [github-smartest-report-cover.png](demo/github-smartest-report-cover.png)
 
 ## X 宣传文案
