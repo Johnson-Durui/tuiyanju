@@ -66,6 +66,24 @@ AUDIENCE_MAP = {
 }
 
 DEFAULT_AGENT_NAMES = ["小红", "王二", "阿杰", "老周", "小雨", "阿梅", "大刘", "阿宁", "阿强", "小北"]
+MODEL_LABELS = {
+    "claude-opus-4-6-thinking": "Claude Opus 4.6 Thinking（推荐）",
+    "claude-opus-4-6": "Claude Opus 4.6",
+    "claude-sonnet-4-6": "Claude Sonnet 4.6（更快）",
+    "gpt-5": "GPT-5",
+    "gpt-4o": "GPT-4o",
+    "gpt-4o-mini": "GPT-4o-mini（快）",
+    "gpt-4-turbo": "GPT-4-turbo",
+}
+PREFERRED_MODEL_ORDER = [
+    "claude-opus-4-6-thinking",
+    "claude-opus-4-6",
+    "claude-sonnet-4-6",
+    "gpt-5",
+    "gpt-4o",
+    "gpt-4o-mini",
+    "gpt-4-turbo",
+]
 
 DEFAULT_VOICE_PROFILES = [
     {
@@ -303,7 +321,7 @@ def should_include_roundtable(req: "AnalyzeRequest") -> bool:
 
 
 def should_retry_error(exc: Exception) -> bool:
-    if isinstance(exc, (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError)):
+    if isinstance(exc, (httpx.ConnectError, httpx.ReadTimeout, httpx.ReadError, httpx.RemoteProtocolError)):
         return True
 
     if isinstance(exc, httpx.HTTPStatusError):
@@ -323,6 +341,50 @@ def extract_error_message(response: httpx.Response) -> str:
     except Exception:
         pass
     return message
+
+
+def format_exception_message(exc: Exception) -> str:
+    if isinstance(exc, httpx.HTTPStatusError):
+        detail = extract_error_message(exc.response).strip()
+        status = exc.response.status_code
+        return detail or f"上游返回 HTTP {status}"
+    if isinstance(exc, httpx.ReadTimeout):
+        return "中转站响应超时，请稍后重试或切换更快的模型"
+    if isinstance(exc, httpx.ConnectError):
+        return "连接中转站失败，请检查 Base URL 或网络连通性"
+    message = str(exc).strip()
+    if message:
+        return message
+    return exc.__class__.__name__ or "未知错误"
+
+
+def sort_model_ids(model_ids: list[str]) -> list[str]:
+    unique_ids: list[str] = []
+    seen: set[str] = set()
+    for model_id in model_ids:
+        clean = str(model_id or "").strip()
+        if clean and clean not in seen:
+            unique_ids.append(clean)
+            seen.add(clean)
+
+    preferred = [model_id for model_id in PREFERRED_MODEL_ORDER if model_id in seen]
+    remaining = sorted([model_id for model_id in unique_ids if model_id not in set(preferred)])
+    return preferred + remaining
+
+
+async def fetch_available_models(
+    client: httpx.AsyncClient,
+    base_url: str,
+    headers: dict[str, str],
+) -> list[dict[str, str]]:
+    response = await client.get(f"{base_url}/models", headers=headers)
+    response.raise_for_status()
+    payload = response.json()
+    data = payload.get("data") if isinstance(payload, dict) else []
+    sorted_ids = sort_model_ids(
+        [item.get("id") for item in data if isinstance(item, dict) and item.get("id")]
+    )
+    return [{"id": model_id, "label": MODEL_LABELS.get(model_id, model_id)} for model_id in sorted_ids]
 
 
 def build_runtime_prompt(req: dict) -> str:
@@ -770,6 +832,7 @@ async def run_agent_stream(
     current_payload = dict(payload)
     for continuation_round in range(3):
         finish_reason = ""
+        needs_resume = False
         for attempt in range(1, 3):
             received_content = False
             try:
@@ -793,17 +856,39 @@ async def run_agent_stream(
                     await queue.put({"type": "agent_status", "agent_id": agent["id"], "label": f"上游波动，正在重试（第 {attempt + 1} 次）"})
                     await asyncio.sleep(1.0 * attempt)
                     continue
-                await queue.put({"type": "agent_error", "agent_id": agent["id"], "content": str(exc)})
+                if should_retry_error(exc) and (received_content or monologue_parts):
+                    await queue.put(
+                        {
+                            "type": "agent_status",
+                            "agent_id": agent["id"],
+                            "label": "上游在中途波动，正在从中断处续写",
+                        }
+                    )
+                    needs_resume = True
+                    break
+                await queue.put(
+                    {
+                        "type": "agent_error",
+                        "agent_id": agent["id"],
+                        "content": f"{agent_display_name(agent)} 推演失败：{format_exception_message(exc)}",
+                    }
+                )
                 raise
 
-        if finish_reason != "length":
+        if finish_reason != "length" and not needs_resume:
             break
 
         if continuation_round >= 2:
             await queue.put({"type": "agent_status", "agent_id": agent["id"], "label": "已达到当前独白输出上限，先保留当前内容"})
             break
 
-        await queue.put({"type": "agent_status", "agent_id": agent["id"], "label": "这一位还没说完，正在续写剩余部分"})
+        await queue.put(
+            {
+                "type": "agent_status",
+                "agent_id": agent["id"],
+                "label": "这一位还没说完，正在续写剩余部分" if finish_reason == "length" else "正在补完刚才中断的剩余部分",
+            }
+        )
         current_payload = {
             "model": req.model,
             "messages": [
@@ -1106,7 +1191,7 @@ async def stream_analysis(req: AnalyzeRequest, request: Request):
     except httpx.ReadTimeout:
         yield build_sse_message("error", content="中转站响应超时，请稍后重试或切换模型")
     except Exception as e:
-        yield build_sse_message("error", content=str(e))
+        yield build_sse_message("error", content=format_exception_message(e))
 
 
 @app.post("/api/analyze")
@@ -1139,6 +1224,28 @@ async def health():
         "api_configured": configured,
         "base_url": base_url,
     }
+
+
+@app.get("/api/models")
+async def get_models():
+    try:
+        api_key, base_url = get_api_config()
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        timeout = httpx.Timeout(connect=20.0, read=40.0, write=20.0, pool=20.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            models = await fetch_available_models(client, base_url, headers)
+        default_model = models[0]["id"] if models else "claude-opus-4-6-thinking"
+        return {"models": models, "default_model": default_model}
+    except Exception as exc:
+        fallback_ids = sort_model_ids(list(MODEL_LABELS.keys()))
+        return {
+            "models": [{"id": model_id, "label": MODEL_LABELS.get(model_id, model_id)} for model_id in fallback_ids],
+            "default_model": "claude-opus-4-6-thinking",
+            "warning": format_exception_message(exc),
+        }
 
 
 @app.get("/api/modules")

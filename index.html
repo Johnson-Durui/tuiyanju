@@ -6,6 +6,8 @@
 <title>推演局 · Dynamic Cognitive Orchestrator</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&family=Space+Mono:wght@400;700&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.2/html2pdf.bundle.min.js"></script>
 <script src="./export_utils.js"></script>
 <style>
@@ -459,14 +461,16 @@
     display:grid;
     grid-template-columns:minmax(0,1fr) 176px;
     gap:16px;
-    align-items:stretch;
+    align-items:start;
   }
   .input-shell{
     display:grid;
+    grid-template-rows:auto auto;
     gap:12px;
   }
   .textarea-shell{
     position:relative;
+    min-height:132px;
     border-radius:26px;
     border:1px solid rgba(244,206,128,.22);
     background:
@@ -504,7 +508,8 @@
   }
   .primary-actions{
     display:grid;
-    grid-template-rows:minmax(0,1fr) auto;
+    align-self:start;
+    grid-template-rows:132px auto;
     gap:12px;
   }
   .btn-launch,.btn-stop,.btn-s,.btn-ghost{
@@ -515,6 +520,7 @@
     display:grid;
     place-items:center;
     min-height:132px;
+    height:100%;
     border:1px solid rgba(255,239,206,.2);
     background:
       radial-gradient(circle at 30% 24%, rgba(255,250,240,.98), rgba(255,225,155,.94) 24%, rgba(226,162,64,.92) 56%, rgba(113,72,18,.94) 100%);
@@ -579,21 +585,75 @@
   }
   .adv-shell{margin-top:22px}
   .adv-toggle{
-    display:inline-flex;
+    display:flex;
     align-items:center;
-    gap:8px;
-    border:none;
-    background:none;
+    justify-content:space-between;
+    width:100%;
+    padding:16px 18px;
+    border:1px solid rgba(244,206,128,.22);
+    border-radius:20px;
+    background:
+      linear-gradient(180deg, rgba(255,250,239,.06), rgba(255,244,220,.03)),
+      rgba(255,255,255,.025);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.03), 0 18px 32px rgba(0,0,0,.18), 0 0 0 rgba(0,0,0,0);
     cursor:pointer;
-    color:var(--color-text-muted);
+    color:var(--color-text);
     font-family:var(--mono);
     font-size:11px;
     letter-spacing:.12em;
     text-transform:uppercase;
+    transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease,background .18s ease,color .18s ease;
   }
-  .adv-toggle:hover{color:var(--color-accent-strong)}
+  .adv-toggle:hover{
+    color:var(--color-accent-strong);
+    transform:translateY(-1px);
+    border-color:rgba(244,206,128,.34);
+    box-shadow:var(--shadow-focus),0 24px 40px rgba(0,0,0,.2),0 0 28px rgba(215,165,75,.14);
+  }
+  .adv-toggle.open{
+    border-color:rgba(244,206,128,.38);
+    background:
+      linear-gradient(180deg, rgba(255,250,239,.08), rgba(255,244,220,.04)),
+      rgba(255,255,255,.04);
+    box-shadow:var(--shadow-focus),0 26px 46px rgba(0,0,0,.22),0 0 34px rgba(215,165,75,.16);
+  }
   .adv-toggle .arr{display:inline-block;transition:transform .2s ease}
   .adv-toggle.open .arr{transform:rotate(90deg)}
+  .adv-toggle-copy{
+    display:grid;
+    gap:4px;
+    text-align:left;
+  }
+  .adv-toggle-kicker{
+    color:var(--color-accent);
+    font-size:10px;
+    letter-spacing:.16em;
+  }
+  .adv-toggle-title{
+    font-size:12px;
+    letter-spacing:.14em;
+    color:var(--color-text);
+  }
+  .adv-toggle-meta{
+    font-family:var(--sans);
+    font-size:12px;
+    letter-spacing:0;
+    text-transform:none;
+    color:var(--color-text-soft);
+    line-height:1.6;
+  }
+  .adv-toggle-arrow{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width:36px;
+    min-height:36px;
+    border-radius:999px;
+    border:1px solid rgba(244,206,128,.18);
+    background:rgba(255,255,255,.04);
+    color:var(--color-accent-strong);
+    box-shadow:0 0 20px rgba(215,165,75,.08);
+  }
   .adv-panel{
     display:none;
     margin-top:18px;
@@ -1050,6 +1110,25 @@
     border:1px solid rgba(94,183,170,.2);
     background:var(--color-teal-soft);
     color:var(--color-teal);
+  }
+  .stream-reveal{
+    opacity:0;
+    transform:translateY(10px);
+    transition:opacity .34s ease, transform .34s ease, border-color .34s ease, background .34s ease;
+    will-change:opacity,transform;
+  }
+  .stream-reveal.is-visible{
+    opacity:1;
+    transform:translateY(0);
+  }
+  .stream-placeholder{
+    padding:14px 16px;
+    border-radius:18px;
+    border:1px dashed rgba(244,206,128,.18);
+    background:rgba(255,255,255,.022);
+    color:var(--color-text-soft);
+    font-size:13px;
+    line-height:1.7;
   }
   .roster-table{
     width:100%;
@@ -1523,7 +1602,14 @@
       </div>
     </div>
     <div class="adv-shell">
-      <button class="adv-toggle" id="at" onclick="toggleAdv()"><span class="arr">▶</span> 展开高级分析设置</button>
+      <button class="adv-toggle" id="at" onclick="toggleAdv()" aria-expanded="false">
+        <span class="adv-toggle-copy">
+          <span class="adv-toggle-kicker">Advanced Console</span>
+          <span class="adv-toggle-title">展开高级分析设置</span>
+          <span class="adv-toggle-meta">模型、深度、Agent 数量与增强模块都在这里精细控制</span>
+        </span>
+        <span class="adv-toggle-arrow"><span class="arr">▶</span></span>
+      </button>
       <div class="adv-panel" id="ap">
         <div class="control-groups">
           <section class="control-card">
@@ -1698,6 +1784,8 @@ const bubblePalette=['#6c5ce7','#fd79a8','#fdcb6e','#74b9ff','#55efc4','#ff9f43'
 let revealObserver=null,progressObserver=null,darkroomParagraphObserver=null,placeholderTimer=null,placeholderIndex=0,placeholderPhase='typing',placeholderChar=0,activeProgressStep='input';
 let activeAgentCardId='',activeDarkroomId='',roundtableMode='play',roundtablePaused=false,roundtablePlaybackIndex=0,roundtablePlaybackTimer=null;
 let roundtableEntriesCache=[],roundtableClashMarkers=[],readAgentIds=new Set();
+let availableModels=[],availableModelIds=new Set();
+let castingRenderToken=0,castingRenderTimer=null;
 const moduleLabels={winners:'谁会占便宜，谁会吃亏',timeline:'这件事接下来会怎么发展',signal:'网上热闹和真实关键分别是什么',action:'下一步谁最可能先出手',monitor:'后面该盯哪些变化信号',appendix:'把重点整理成清单'};
 const depthLabels={quick:'快照',standard:'标准',pro:'Pro（更深入）',ultra:'Ultra（顶配高 token）',deep:'Pro（更深入）',flagship:'Ultra（顶配高 token）'};
 const audienceLabels={general:'普通读者',manager:'管理层',investor:'投资人',researcher:'研究人员',creator:'内容创作者'};
@@ -1708,6 +1796,7 @@ const REPORT_PRODUCT_META=Object.freeze({
   schemaVersion:'analysis.json v1 · export schema v2',
 });
 const $=id=>document.getElementById(id);
+function escapeAttr(text){return escapeHtml(text).replaceAll("'",'&#39;')}
 function hashIndex(text,mod=bubblePalette.length){
   const source=String(text||'未命名角色');
   let hash=0;
@@ -1746,6 +1835,34 @@ function jumpToSection(id){
 }
 function scrollToTop(){
   window.scrollTo({top:0,behavior:'smooth'});
+}
+function renderModelOptions(models,currentValue=''){
+  const select=$('ms');
+  if(!select||!Array.isArray(models)||!models.length)return;
+  select.innerHTML=models.map(model=>`<option value="${escapeAttr(model.id)}">${escapeHtml(model.label||model.id)}</option>`).join('');
+  const nextValue=models.some(model=>model.id===currentValue)?currentValue:(models[0]?.id||'');
+  if(nextValue)select.value=nextValue;
+  availableModels=models;
+  availableModelIds=new Set(models.map(model=>model.id));
+}
+async function loadAvailableModels(){
+  const select=$('ms');
+  if(!select)return;
+  try{
+    const currentValue=select.value;
+    const response=await fetch(`${API}/api/models`);
+    if(!response.ok)throw new Error(`模型列表加载失败（${response.status}）`);
+    const payload=await response.json();
+    if(Array.isArray(payload.models)&&payload.models.length){
+      renderModelOptions(payload.models,payload.default_model&&payload.models.some(model=>model.id===currentValue)?currentValue:(payload.default_model||currentValue));
+    }else{
+      availableModels=[...select.options].map(option=>({id:option.value,label:option.textContent||option.value}));
+      availableModelIds=new Set(availableModels.map(model=>model.id));
+    }
+  }catch(_error){
+    availableModels=[...select.options].map(option=>({id:option.value,label:option.textContent||option.value}));
+    availableModelIds=new Set(availableModels.map(model=>model.id));
+  }
 }
 function setProgressStep(step){
   activeProgressStep=step;
@@ -2115,10 +2232,17 @@ function bindDirectorAccordion(){
 }
 function getActiveModuleLabels(){return[...mods].map(id=>moduleLabels[id]||id)}
 function st(v){$('ti').value=v;$('ti').focus()}
+function renderAdvToggle(open){
+  const btn=$('at');
+  if(!btn)return;
+  btn.classList.toggle('open',open);
+  btn.setAttribute('aria-expanded',open?'true':'false');
+  btn.innerHTML=`<span class="adv-toggle-copy"><span class="adv-toggle-kicker">Advanced Console</span><span class="adv-toggle-title">${open?'收起高级分析设置':'展开高级分析设置'}</span><span class="adv-toggle-meta">模型、深度、Agent 数量与增强模块都在这里精细控制</span></span><span class="adv-toggle-arrow"><span class="arr">▶</span></span>`;
+}
 function toggleAdv(){
-  const open=$('at').classList.toggle('open');
+  const open=!$('ap').classList.contains('open');
   $('ap').classList.toggle('open');
-  $('at').innerHTML=`<span class="arr">▶</span> ${open?'收起高级分析设置':'展开高级分析设置'}`;
+  renderAdvToggle(open);
 }
 function tm(el){const id=el.dataset.id;mods.has(id)?(mods.delete(id),el.classList.remove('on')):(mods.add(id),el.classList.add('on'))}
 function ss(c,t){$('sdot').className='dot '+c;$('stxt').textContent=t}
@@ -2146,6 +2270,10 @@ function addStep(text,state='live'){
   updateReportChrome();
 }
 function toggleProcess(){const folded=$('pb').classList.toggle('folded');$('ptg').textContent=folded?'展开':'折叠'}
+function clearCastingRenderQueue(){
+  if(castingRenderTimer){clearTimeout(castingRenderTimer);castingRenderTimer=null}
+  castingRenderToken+=1;
+}
 function clearRenderQueue(){if(renderTimer){clearTimeout(renderTimer);renderTimer=null}renderPending=false;renderPendingLive=false}
 function clearRoundtableRenderQueue(){if(roundtableRenderTimer){clearTimeout(roundtableRenderTimer);roundtableRenderTimer=null}roundtableRenderPending=false;roundtableRenderPendingLive=false}
 function clearAgentRenderQueue(){if(agentRenderTimer){clearTimeout(agentRenderTimer);agentRenderTimer=null}pendingAgentRenders.clear()}
@@ -2249,6 +2377,7 @@ function updateReportChrome(){
   renderStatusMetrics();
 }
 function resetScenarioViews(){
+  clearCastingRenderQueue();
   castingData=null;agentStates=new Map();agentOrder=[];
   $('sp').classList.remove('on');$('apanel').classList.remove('on');$('rtpanel').classList.remove('on');$('dpanel').classList.remove('on');
   $('im').innerHTML='';$('ax').innerHTML='';$('rg').innerHTML='';$('dg').innerHTML='';$('ag').innerHTML='';$('rc').innerHTML='';$('oc').innerHTML='';
@@ -2268,14 +2397,27 @@ function upsertAgent(agent){
   if(!agentOrder.includes(agent.id))agentOrder.push(agent.id);
   return next;
 }
+function appendStreamingNode(target,html){
+  if(!target)return null;
+  target.insertAdjacentHTML('beforeend',html);
+  const node=target.lastElementChild;
+  if(node){
+    node.classList.add('stream-reveal');
+    requestAnimationFrame(()=>node.classList.add('is-visible'));
+  }
+  return node;
+}
+function queueCastingStep(token,fn,delay=110){
+  castingRenderTimer=setTimeout(()=>{
+    if(token!==castingRenderToken)return;
+    fn();
+  },reducedMotion?0:delay);
+}
 function renderCasting(data){
   castingData=data;
   $('sp').classList.add('on');
   $('apanel').classList.add('on');
   setProgressStep('deconstruction');
-  $('im').innerHTML=`<span class="meta-chip">议题类型：${escapeHtml(data.issue_type||'未判定')}</span><span class="meta-chip">冲突轴：${(data.conflict_axes||[]).length} 条</span><span class="meta-chip">Agent：${(data.agents||[]).length} 位</span>`;
-  $('ax').innerHTML=(data.conflict_axes||[]).map(axis=>`<span class="axis-chip">${escapeHtml(axis)}</span>`).join('');
-  $('rg').innerHTML=`<table class="roster-table"><colgroup><col style="width:18%"><col style="width:50%"><col style="width:32%"></colgroup><thead><tr><th>角色</th><th>身份画像</th><th>核心视角</th></tr></thead><tbody>${(data.agents||[]).map(agent=>`<tr><td><div class="roster-name">${escapeHtml(getAgentDisplayName(agent))}</div></td><td><div class="roster-identity">${escapeHtml(getAgentIdentityLine(agent)||agent.identity||'身份信息待补充')}<small>${escapeHtml(agent.why_selected?`为什么上场：${agent.why_selected}`:'视角来源待补充')}</small></div></td><td><div class="roster-dims">${escapeHtml(getAgentAlias(agent)||'关键视角')}<small>${escapeHtml((agent.dimensions||[]).join(' · ')||'观察维度待补充')}</small></div></td></tr>`).join('')}</tbody></table>`;
   const decon=data.topic_deconstruction||{};
   const cards=[
     ['表层冲突',decon.surface_conflict],
@@ -2284,8 +2426,71 @@ function renderCasting(data){
     ['响但次要',decon.loud_but_minor],
     ['沉默但关键',decon.silent_but_powerful]
   ];
-  $('dg').innerHTML=cards.map(([label,text])=>`<div class="decon-card"><div class="decon-label">${escapeHtml(label)}</div><div class="decon-text">${escapeHtml(text||'')}</div></div>`).join('');
+  clearCastingRenderQueue();
+  $('im').innerHTML='';
+  $('ax').innerHTML='';
+  $('rg').innerHTML=`<div class="stream-placeholder">选角结果正在逐段装配中：先落议题信息，再展开冲突轴、上场名单与议题拆解。</div>`;
+  $('dg').innerHTML='';
   (data.agents||[]).forEach(agent=>{upsertAgent(agent)});
+  const token=castingRenderToken;
+  const metaItems=[
+    `议题类型：${escapeHtml(data.issue_type||'未判定')}`,
+    `冲突轴：${(data.conflict_axes||[]).length} 条`,
+    `Agent：${(data.agents||[]).length} 位`
+  ];
+  let metaIndex=0;
+  const streamMeta=()=>{
+    if(token!==castingRenderToken)return;
+    if(metaIndex<metaItems.length){
+      appendStreamingNode($('im'),`<span class="meta-chip">${metaItems[metaIndex]}</span>`);
+      metaIndex+=1;
+      queueCastingStep(token,streamMeta,70);
+      return;
+    }
+    const axes=data.conflict_axes||[];
+    let axisIndex=0;
+    const streamAxes=()=>{
+      if(token!==castingRenderToken)return;
+      if(axisIndex<axes.length){
+        appendStreamingNode($('ax'),`<span class="axis-chip">${escapeHtml(axes[axisIndex])}</span>`);
+        axisIndex+=1;
+        queueCastingStep(token,streamAxes,75);
+        return;
+      }
+      $('rg').innerHTML=`<table class="roster-table"><colgroup><col style="width:18%"><col style="width:50%"><col style="width:32%"></colgroup><thead><tr><th>角色</th><th>身份画像</th><th>核心视角</th></tr></thead><tbody></tbody></table>`;
+      const rosterBody=$('rg').querySelector('tbody');
+      const agents=data.agents||[];
+      let rosterIndex=0;
+      const streamRoster=()=>{
+        if(token!==castingRenderToken)return;
+        if(rosterIndex<agents.length){
+          const agent=agents[rosterIndex];
+          appendStreamingNode(rosterBody,`<tr><td><div class="roster-name">${escapeHtml(getAgentDisplayName(agent))}</div></td><td><div class="roster-identity">${escapeHtml(getAgentIdentityLine(agent)||agent.identity||'身份信息待补充')}<small>${escapeHtml(agent.why_selected?`为什么上场：${agent.why_selected}`:'视角来源待补充')}</small></div></td><td><div class="roster-dims">${escapeHtml(getAgentAlias(agent)||'关键视角')}<small>${escapeHtml((agent.dimensions||[]).join(' · ')||'观察维度待补充')}</small></div></td></tr>`);
+          rosterIndex+=1;
+          updateReportChrome();
+          queueCastingStep(token,streamRoster,90);
+          return;
+        }
+        let cardIndex=0;
+        const streamCards=()=>{
+          if(token!==castingRenderToken)return;
+          if(cardIndex<cards.length){
+            const [label,text]=cards[cardIndex];
+            appendStreamingNode($('dg'),`<div class="decon-card"><div class="decon-label">${escapeHtml(label)}</div><div class="decon-text">${escapeHtml(text||'')}</div></div>`);
+            cardIndex+=1;
+            queueCastingStep(token,streamCards,85);
+            return;
+          }
+          registerRevealNodes($('sp'));
+          updateReportChrome();
+        };
+        streamCards();
+      };
+      streamRoster();
+    };
+    streamAxes();
+  };
+  streamMeta();
   registerRevealNodes();
   updateReportChrome();
 }
@@ -2546,6 +2751,98 @@ function buildPdfDocumentMarkup(formalData,traceLines,exportedAt,exportMode='ful
     .rich-report code{background:#f3f4f6;padding:.2mm 1.2mm;border-radius:1mm}
   </style>${isShare?`${coverSection}${quickSummarySection}${shareCastingSection}${shareInsightsSection}${shareActionsSection}`:`${coverSection}${quickSummarySection}${manifestSection}${processSection}${castingSection}${agentSection}${roundtableSection}${reportSection}`}</div>`;
 }
+function getErrorHelpText(msg=''){
+  const text=String(msg||'');
+  if(/No available channel|model .*not found|不支持模型|unsupported model/i.test(text)){
+    const supported=availableModels.length?availableModels.map(model=>model.label||model.id).join('、'):'当前中转站实际支持的模型';
+    return `当前更像是模型不受支持或该通道暂时不可用。可优先切换为：${supported}`;
+  }
+  if(/超时|timeout|ReadTimeout/i.test(text)){
+    return '当前更像是中转站响应超时。建议先切到 Claude Sonnet 4.6 或把深度调成快照 / 标准后重试。';
+  }
+  if(/Agent .*推演失败|中途波动|503|502|504|429/i.test(text)){
+    return '当前更像是上游中转站在某一位 Agent 阶段发生波动。现在系统会自动续写重试；如果仍失败，建议换更快模型再试。';
+  }
+  return '请检查后端是否运行，以及中转站 Base URL / API Key / 模型是否配置正确。';
+}
+async function buildPdfFromPages(pdfSource,fileName){
+  const jsPdfCtor=window.jspdf?.jsPDF||window.jsPDF||window?.jspdf?.default?.jsPDF;
+  const html2canvasRef=window.html2canvas;
+  if(!jsPdfCtor||!html2canvasRef){
+    if(window.html2pdf){
+      await html2pdf().set({
+        margin:[20,20,20,20],
+        filename:fileName,
+        image:{type:'jpeg',quality:0.96},
+        html2canvas:{
+          scale:1.3,
+          useCORS:true,
+          backgroundColor:'#ffffff',
+          scrollX:0,
+          scrollY:0,
+          logging:false,
+          windowWidth:Math.max(pdfSource.scrollWidth,794),
+        },
+        jsPDF:{unit:'mm',format:'a4',orientation:'portrait'},
+        pagebreak:{mode:['css','legacy']},
+      }).from(pdfSource).save();
+      return;
+    }
+    throw new Error('PDF 渲染组件未完全加载，请刷新页面后重试');
+  }
+
+  const pdf=new jsPdfCtor({unit:'mm',format:'a4',orientation:'portrait',compress:true});
+  const marginX=20;
+  const marginY=20;
+  const usableWidthMm=170;
+  const usableHeightMm=257;
+  const pages=[...pdfSource.querySelectorAll('.pdf-page')];
+  if(!pages.length)throw new Error('未找到可导出的 PDF 页面');
+
+  let isFirstPdfPage=true;
+  for(const pageEl of pages){
+    const canvas=await html2canvasRef(pageEl,{
+      scale:1.8,
+      useCORS:true,
+      backgroundColor:'#ffffff',
+      scrollX:0,
+      scrollY:0,
+      logging:false,
+      windowWidth:Math.max(pageEl.scrollWidth,794),
+      windowHeight:Math.max(pageEl.scrollHeight,1123),
+    });
+    const pxPerMm=canvas.width/usableWidthMm;
+    const sliceHeightPx=Math.max(1,Math.floor(usableHeightMm*pxPerMm));
+    for(let offsetY=0;offsetY<canvas.height;offsetY+=sliceHeightPx){
+      const remaining=canvas.height-offsetY;
+      const currentSliceHeight=Math.min(sliceHeightPx,remaining);
+      const sliceCanvas=document.createElement('canvas');
+      sliceCanvas.width=canvas.width;
+      sliceCanvas.height=currentSliceHeight;
+      const ctx=sliceCanvas.getContext('2d');
+      if(!ctx)throw new Error('无法创建 PDF 切片画布');
+      ctx.fillStyle='#ffffff';
+      ctx.fillRect(0,0,sliceCanvas.width,sliceCanvas.height);
+      ctx.drawImage(
+        canvas,
+        0,
+        offsetY,
+        canvas.width,
+        currentSliceHeight,
+        0,
+        0,
+        sliceCanvas.width,
+        sliceCanvas.height
+      );
+      const sliceHeightMm=currentSliceHeight/pxPerMm;
+      if(!isFirstPdfPage)pdf.addPage('a4','portrait');
+      pdf.addImage(sliceCanvas.toDataURL('image/jpeg',0.98),'JPEG',marginX,marginY,usableWidthMm,sliceHeightMm,undefined,'FAST');
+      isFirstPdfPage=false;
+    }
+  }
+
+  pdf.save(fileName);
+}
 async function exportPdf(evt,exportMode='full'){
   const trigger=evt?.currentTarget||$('pdfBtn');
   const originalLabel=trigger?.textContent||(exportMode==='share'?'导出传播版 PDF':'导出完整 PDF');
@@ -2561,37 +2858,27 @@ async function exportPdf(evt,exportMode='full'){
     const traceLines=ExportUtils.collectTraceLines(exportState);
     const topicRaw=(formalData.topicLabel||$('tb').textContent||'推演局报告').replace(/^话题：/,'').trim();
     const topicFile=(sanitizeFileName(topicRaw).slice(0,30)||'报告');
+    const fileName=`推演局-${topicFile}${exportMode==='share'?'-share':''}.pdf`;
     exportRoot=document.createElement('div');
     exportRoot.id='pdf-export-root';
     exportRoot.style.position='fixed';
-    exportRoot.style.left='0';
-    exportRoot.style.top='0';
-    exportRoot.style.width='100vw';
-    exportRoot.style.height='100vh';
+    exportRoot.style.inset='0';
     exportRoot.style.overflow='auto';
-    exportRoot.style.display='flex';
-    exportRoot.style.justifyContent='center';
-    exportRoot.style.alignItems='flex-start';
-    exportRoot.style.padding='16px';
+    exportRoot.style.padding='24px 0 48px';
     exportRoot.style.opacity='1';
     exportRoot.style.pointerEvents='none';
     exportRoot.style.zIndex='2147483646';
-    exportRoot.style.background='rgba(255,255,255,0.01)';
+    exportRoot.style.background='rgba(255,255,255,0.98)';
     exportRoot.style.boxShadow='none';
-    exportRoot.innerHTML=buildPdfDocumentMarkup(formalData,traceLines,formatExportTime(),exportMode);
+    exportRoot.innerHTML=`<div style="width:210mm;margin:0 auto;">${buildPdfDocumentMarkup(formalData,traceLines,formatExportTime(),exportMode)}</div>`;
     document.body.appendChild(exportRoot);
     exportRoot.querySelectorAll('details').forEach(node=>{node.open=true});
     exportRoot.querySelectorAll('.cursor').forEach(node=>node.remove());
     if(document.fonts?.ready)await document.fonts.ready;
     await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
-    await html2pdf().set({
-      margin:[20,20,20,20],
-      filename:`推演局-${topicFile}${exportMode==='share'?'-share':''}.pdf`,
-      image:{type:'jpeg',quality:0.98},
-      html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff',scrollX:0,scrollY:0,logging:false,windowWidth:exportRoot.scrollWidth,windowHeight:exportRoot.scrollHeight},
-      jsPDF:{unit:'mm',format:'a4',orientation:'portrait'},
-      pagebreak:{mode:['css','legacy']},
-    }).from(exportRoot).save();
+    await new Promise(resolve=>setTimeout(resolve,120));
+    const pdfSource=exportRoot.querySelector('.pdf-doc')||exportRoot;
+    await buildPdfFromPages(pdfSource,fileName);
   }catch(error){
     window.alert(`PDF 生成失败：${error?.message||error}`);
   }finally{
@@ -2606,6 +2893,10 @@ function handleAbort(){if(abortSilently){abortSilently=false;finishRun();return}
 function reset(){if(ctl){abortSilently=true;ctl.abort()}clearRenderQueue();clearRoundtableRenderQueue();clearAgentRenderQueue();stopRoundtablePlayback();$('op').classList.remove('on');$('ab').classList.remove('on');$('lb2').classList.remove('active');$('ti').value='';$('mb').innerHTML='';$('pp').classList.remove('on');$('pl').innerHTML='';$('pb').classList.remove('folded');$('ptg').textContent='折叠';resetScenarioViews();md='';roundtableMd='';currentReportId='';readAgentIds=new Set();ss('ready','READY');clearInterval(ti);ctl=null;setRunState(false);clearRunTransition(true);closeDarkroom();updateReportChrome()}
 async function go(){
   const topic=$('ti').value.trim();if(!topic){$('ti').focus();return}
+  if(availableModelIds.size&&!availableModelIds.has($('ms').value)){
+    err(`当前中转站不支持模型：${$('ms').value}`);
+    return;
+  }
   ctl=new AbortController();
   const req={topic,model:$('ms').value,depth:$('depth').value,audience:$('aud').value,agent_count:$('ac').value,active_modules:[...mods]};
   currentReportId=buildReportId({topicLabel:`话题：${topic}`,modelName:req.model,depthLabel:depthLabels[req.depth]||req.depth},formatExportTime());
@@ -2665,7 +2956,7 @@ function err(msg){
   clearRenderQueue();
   clearRoundtableRenderQueue();
   flushAgentRenders();
-  $('oc').innerHTML=`<div style="color:#c94040;font-family:var(--mono);font-size:13px;padding:1rem;border:1px solid #c9404044">✕ 推演失败：${msg}<br><br><span style="color:var(--color-text-soft)">请检查后端是否运行、中转站 Base URL / API Key 是否配置正确</span></div>`;
+  $('oc').innerHTML=`<div style="color:#c94040;font-family:var(--mono);font-size:13px;padding:1rem;border:1px solid #c9404044">✕ 推演失败：${escapeHtml(String(msg||'未知错误'))}<br><br><span style="color:var(--color-text-soft)">${escapeHtml(getErrorHelpText(msg))}</span></div>`;
   $('dpanel').classList.add('on');
   $('launchStatusLabel').textContent='推演失败，请检查配置后重试';
   ctl=null;setRunState(false);$('lb2').classList.remove('active');ss('','ERROR');
@@ -2678,6 +2969,8 @@ $('darkroomOverlay').addEventListener('click',e=>{if(e.target===e.currentTarget)
 initProgressNavigation();
 registerRevealNodes();
 startPlaceholderCycle();
+renderAdvToggle(false);
+loadAvailableModels();
 updateReportChrome();
 </script>
 </body>
