@@ -1,5 +1,23 @@
+# OS & Editor
 .DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Secrets & Local Environment
 .env
+.env.*
+!.env.example
+
+# Python Virtual Envs & Bytecode
 .venv/
+venv/
 __pycache__/
 *.py[cod]
+*$py.class
+
+# Tooling Caches & Reports
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+evals/reports/

@@ -16,6 +16,83 @@
 
   const PROCESS_HINT_TERMS = ["正在", "已完成选角", "局长正在", "配置"];
 
+  const ORCHESTRATION_MODE_LABELS = {
+    multi_agent: "真·多Agent并发隔离",
+    single_stream: "极速单流推演",
+    demo: "内置离线演示",
+    auto: "智能自动编排",
+  };
+
+  const SECTION_FOLD_SPECS = [
+    {
+      key: "deconstruction",
+      label: "话题解构与关键变量（可折叠）",
+      defaultOpen: true,
+      matcher:
+        /(?:话题解构|议题拆解|冲突拆解|问题拆解|核心拆解|议题解构)/i,
+    },
+    {
+      key: "casting",
+      label: "动态选角与冲突阵容（可折叠）",
+      defaultOpen: false,
+      matcher:
+        /(?:动态选角|选角总览|选角结果|召唤阵容|角色阵容|Agent\s*阵容|上场名单)/i,
+    },
+    {
+      key: "darkroom",
+      label: "Agent 各抒己见 · 暗房独白（可折叠）",
+      defaultOpen: true,
+      matcher:
+        /(?:独立思考暗房|暗房独白|暗房发言|独立暗房|各\s*Agent.*(?:独白|发言|思考|观点)|Agent\s*(?:独立)?(?:独白|发言|观点|思考)|角色独白|多方独白|各抒己见)/i,
+    },
+    {
+      key: "roundtable",
+      label: "圆桌激辩 · 正面交锋（可折叠）",
+      defaultOpen: true,
+      matcher:
+        /(?:圆桌激辩|圆桌交锋|圆桌碰撞|正面交锋|多方激辩|交叉辩论)/i,
+    },
+    {
+      key: "director",
+      label: "局长整合报告（可折叠）",
+      defaultOpen: true,
+      matcher:
+        /(?:局长整合报告|局长报告|整合报告|局长总结|全局总结|立体结构图)/i,
+    },
+    {
+      key: "actions",
+      label: "行动建议 · 现实检验（可折叠）",
+      defaultOpen: true,
+      matcher:
+        /(?:行动建议|落地建议|可执行建议|应对建议|破局建议)/i,
+    },
+    {
+      key: "layering",
+      label: "事实 / 推断 / 情绪分层（可折叠）",
+      defaultOpen: true,
+      matcher:
+        /(?:事实\s*[\/／、与和]\s*推断|事实分层|认知分层|三层拆解|事实.*推断.*情绪)/i,
+    },
+    {
+      key: "enhancements",
+      label: "增强模块与推演附录（可折叠）",
+      defaultOpen: false,
+      matcher:
+        /(?:增强模块|赢家.*输家|时间切片|舆论\s*(?:vs|与|对)\s*真实|谁.*先行动|谁.*先出手|观察指标|变化信号|结构化附录|重点.*清单)/i,
+    },
+  ];
+
+  function matchSectionFoldRule(headingText) {
+    const clean = normalizeText(headingText).replace(/^[\d一二三四五六七八九十]+[、.．:：\s]+/, "");
+    if (!clean) return null;
+    for (const spec of SECTION_FOLD_SPECS) {
+      if (spec.matcher.test(clean)) {
+        return spec;
+      }
+    }
+    return null;
+  }
+
   function normalizeText(text) {
     return String(text || "")
       .replace(/\r/g, "")
@@ -79,9 +156,11 @@
 
   function findSection(sections, needles) {
     for (const needle of needles) {
-      const matched = sections.find((section) =>
-        String(section.title || "").includes(needle)
-      );
+      const matched = sections.find((section) => {
+        const title = String(section.title || "");
+        if (needle instanceof RegExp) return needle.test(title);
+        return title.includes(needle);
+      });
       if (matched) return matched;
     }
     return null;
@@ -148,10 +227,12 @@
     const sections = parseDirectorSections(formal.directorMarkdown);
     const allSentences = buildSentencePool(sections);
     const truthSection =
-      findSection(sections, ["立体真相", "真相", "总结"]) || sections[sections.length - 1] || null;
+      findSection(sections, ["立体真相", "真相", "总结", "结论"]) ||
+      sections[sections.length - 1] ||
+      null;
     const conflictSection =
-      findSection(sections, ["断层与错位", "深层动力", "表层冲突"]) || truthSection;
-    const actionSection = findSection(sections, ["行动建议", "建议"]);
+      findSection(sections, ["断层与错位", "深层动力", "表层冲突", "错位"]) || truthSection;
+    const actionSection = findSection(sections, ["行动建议", "落地建议", "可执行建议", "建议"]);
     const blindspotSection =
       findSection(sections, ["隐藏变量", "断层与错位", "表层冲突"]) || conflictSection;
 
@@ -199,7 +280,7 @@
       })() ||
       pickSentence(
         allSentences,
-        (text) => /年轻人|家长|老师|平台|决策者|管理者/.test(text)
+        (text) => /年轻人|家长|老师|平台|决策者|管理者|从业者/.test(text)
       ) ||
       oneLineSentence;
 
@@ -207,7 +288,8 @@
       truthSentences.find((item) => item.text !== oneLineSentence.text) ||
       pickSentence(
         allSentences,
-        (text) => /不是.+而是.+|归根到底|最后|真正/.test(text) && text !== oneLineSentence.text
+        (text) =>
+          /不是.+而是.+|归根到底|最后|真正/.test(text) && text !== oneLineSentence.text
       ) ||
       oneLineSentence;
 
@@ -218,8 +300,8 @@
         78
       ),
       biggest_misconception: makeSummaryField(
-        misconceptionSentence.text,
-        misconceptionSentence.source,
+        misconceptionSentence ? misconceptionSentence.text : oneLineSentence.text,
+        misconceptionSentence ? misconceptionSentence.source : oneLineSentence.source,
         92
       ),
       key_conflict: makeSummaryField(
@@ -277,7 +359,7 @@
   function extractActionSuggestions(state, maxItems = 3) {
     const formal = collectFormalExportData(state);
     const sections = parseDirectorSections(formal.directorMarkdown);
-    const actionSection = findSection(sections, ["行动建议", "建议"]);
+    const actionSection = findSection(sections, ["行动建议", "落地建议", "可执行建议", "建议"]);
     if (!actionSection) return [];
 
     const rawBlocks = String(actionSection.content || "")
@@ -345,7 +427,7 @@
           source: section.title || "圆桌激辩",
         }));
         const best = pickBestSentence(sentences, [
-          /不同意|问题是|你这话|但你忽略了|反过来|补一句/,
+          /不同意|问题是|你这话|但你忽略了|反过来|补一句|反驳/,
           /其实|真正|关键|根本/,
           /共识|一样|反而/,
         ]);
@@ -370,10 +452,10 @@
     const sections = parseDirectorSections(formal.directorMarkdown);
     const desired = [
       ["C. 共识地带", ["共识地带"]],
-      ["D. 断层与错位", ["断层与错位"]],
-      ["E. 嗓门与筹码", ["嗓门与筹码"]],
+      ["D. 断层与错位", ["断层与错位", "错位"]],
+      ["E. 嗓门与筹码", ["嗓门与筹码", "筹码"]],
       ["F. 隐藏变量", ["隐藏变量"]],
-      ["G. 未来触发器", ["未来触发器"]],
+      ["G. 未来触发器", ["未来触发器", "触发器"]],
       ["H. 立体真相", ["立体真相", "真相"]],
     ];
 
@@ -386,8 +468,11 @@
           source: section.title || label,
         }));
         const best =
-          pickBestSentence(sentences, [/不是.+而是.+/, /真正|关键|最|不会|其实/, /共识|错位|按钮|触发器/]) ||
-          sentences[0];
+          pickBestSentence(sentences, [
+            /不是.+而是.+/,
+            /真正|关键|最|不会|其实/,
+            /共识|错位|按钮|触发器/,
+          ]) || sentences[0];
         if (!best) return null;
         return {
           title: label.replace(/^[A-Z]\.\s*/, ""),
@@ -434,7 +519,9 @@
       {
         key: "roundtable",
         label: "圆桌激辩",
-        enabled: Boolean(formal.roundtableMarkdown),
+        enabled:
+          Boolean(formal.roundtableMarkdown) ||
+          hasSectionWithNeedles(sections, ["圆桌激辩", "圆桌交锋"]),
       },
       {
         key: "voice_vs_power",
@@ -449,7 +536,7 @@
       {
         key: "action_suggestions",
         label: "行动建议",
-        enabled: hasSectionWithNeedles(sections, ["行动建议"]),
+        enabled: hasSectionWithNeedles(sections, ["行动建议", "落地建议"]),
       },
       {
         key: "common_ground",
@@ -461,7 +548,11 @@
         label: "事实 / 推断 / 情绪分层",
         enabled:
           /事实层|推断层|情绪层/.test(formal.directorMarkdown) ||
-          hasSectionWithNeedles(sections, ["事实/推断/情绪分层", "事实 / 推断 / 情绪分层"]),
+          hasSectionWithNeedles(sections, [
+            "事实/推断/情绪分层",
+            "事实 / 推断 / 情绪分层",
+            "事实分层",
+          ]),
       },
     ];
 
@@ -497,14 +588,26 @@
     return next;
   }
 
+  function resolveModeLabel(mode, explicitLabel) {
+    if (explicitLabel && String(explicitLabel).trim()) {
+      return String(explicitLabel).trim();
+    }
+    const clean = String(mode || "").trim();
+    return ORCHESTRATION_MODE_LABELS[clean] || clean;
+  }
+
   function collectFormalExportData(state) {
     const agents = Array.isArray(state?.agents) ? state.agents.map(cloneAgent) : [];
     const decon = state?.topicDeconstruction || {};
+    const orchestrationMode = String(state?.orchestrationMode || "").trim();
+    const orchestrationLabel = resolveModeLabel(orchestrationMode, state?.orchestrationLabel);
     return {
       topicLabel: String(state?.topicLabel || "").trim(),
       modelName: String(state?.modelName || "").trim(),
       depthLabel: String(state?.depthLabel || "").trim(),
       audienceLabel: String(state?.audienceLabel || "").trim(),
+      orchestrationMode,
+      orchestrationLabel,
       moduleLabels: Array.isArray(state?.moduleLabels) ? [...state.moduleLabels] : [],
       issueType: String(state?.issueType || "").trim(),
       conflictAxes: Array.isArray(state?.conflictAxes) ? [...state.conflictAxes] : [],
@@ -531,19 +634,29 @@
     const includeTrace = Boolean(options.includeTrace);
     const formal = collectFormalExportData(state);
     const traceLines = includeTrace ? collectTraceLines(state) : [];
-    const lines = ["推演局报告", formal.topicLabel || "", `模型：${formal.modelName}`];
+    const divider = "════════════════════════════════════════════════════════════";
+    const subDivider = "────────────────────────────────────────────────────────────";
 
+    const lines = [
+      divider,
+      "推演局报告 · Dynamic Cognitive Orchestrator",
+      divider,
+      formal.topicLabel || "未命名议题",
+      `模型：${formal.modelName || "默认模型"}`,
+    ];
+
+    if (formal.orchestrationLabel) lines.push(`编排引擎：${formal.orchestrationLabel}`);
     if (formal.depthLabel) lines.push(`分析深度：${formal.depthLabel}`);
     if (formal.audienceLabel) lines.push(`目标读者：${formal.audienceLabel}`);
     if (formal.moduleLabels.length) lines.push(`增强模块：${formal.moduleLabels.join("；")}`);
 
     if (includeTrace) {
-      lines.push("", "【推演过程提示】", ...(traceLines.length ? traceLines : ["无"]));
+      lines.push("", subDivider, "【推演过程提示】", ...(traceLines.length ? traceLines : ["无"]));
     }
 
     if (formal.issueType || formal.conflictAxes.length || formal.agents.length) {
       const decon = formal.topicDeconstruction;
-      lines.push("", "【选角总览】");
+      lines.push("", subDivider, "【选角总览】");
       if (formal.issueType) lines.push(`议题类型：${formal.issueType}`);
       if (formal.conflictAxes.length) lines.push(`冲突轴：${formal.conflictAxes.join("；")}`);
       formal.agents.forEach((agent) => {
@@ -561,7 +674,7 @@
     }
 
     if (formal.agents.length) {
-      lines.push("", "【Agent 暗房独白】");
+      lines.push("", subDivider, "【Agent 暗房独白】");
       formal.agents.forEach((agent) => {
         lines.push(
           `\n### ${agent.display_name || agent.id || ""}`,
@@ -577,11 +690,100 @@
     }
 
     if (formal.roundtableMarkdown) {
-      lines.push("", "【圆桌激辩】", formal.roundtableMarkdown);
+      lines.push("", subDivider, "【圆桌激辩】", formal.roundtableMarkdown);
     }
 
-    lines.push("", "【局长整合报告】", formal.directorMarkdown || "");
+    lines.push("", subDivider, "【局长整合报告】", formal.directorMarkdown || "", divider);
     return lines.join("\n");
+  }
+
+  function buildExportMarkdown(state, options = {}) {
+    const includeTrace = Boolean(options.includeTrace);
+    const formal = collectFormalExportData(state);
+    const traceLines = includeTrace ? collectTraceLines(state) : [];
+    const quick = formal.directorMarkdown ? extractQuickSummary(formal) : null;
+    const topicClean = (formal.topicLabel || "未命名议题").replace(/^话题：/, "").trim();
+
+    const blocks = [
+      `# 推演局正式报告：${topicClean}`,
+      "",
+      `- **模型**：${formal.modelName || "默认模型"}`,
+    ];
+    if (formal.orchestrationLabel) blocks.push(`- **编排引擎**：${formal.orchestrationLabel}`);
+    if (formal.depthLabel) blocks.push(`- **分析深度**：${formal.depthLabel}`);
+    if (formal.audienceLabel) blocks.push(`- **目标读者**：${formal.audienceLabel}`);
+    if (formal.moduleLabels.length) blocks.push(`- **增强模块**：${formal.moduleLabels.join("、")}`);
+
+    if (quick && formal.directorMarkdown) {
+      blocks.push(
+        "",
+        "## 30 秒核心摘要",
+        "",
+        `> **一句话判断**：${quick.one_line_judgment.text}`,
+        "",
+        `- **最大误区**：${quick.biggest_misconception.text}`,
+        `- **关键冲突**：${quick.key_conflict.text}`,
+        `- **优先读者**：${quick.priority_readers.text}`
+      );
+    }
+
+    if (includeTrace) {
+      blocks.push(
+        "",
+        "## 推演过程提示",
+        "",
+        ...(traceLines.length ? traceLines.map((line) => `- ${line}`) : ["- 无"])
+      );
+    }
+
+    if (formal.issueType || formal.conflictAxes.length || formal.agents.length) {
+      const decon = formal.topicDeconstruction;
+      blocks.push("", "## 选角总览", "");
+      if (formal.issueType) blocks.push(`- **议题类型**：${formal.issueType}`);
+      if (formal.conflictAxes.length) blocks.push(`- **核心冲突轴**：${formal.conflictAxes.join("；")}`);
+      if (decon.surface_conflict) blocks.push(`- **表层冲突**：${decon.surface_conflict}`);
+      if (decon.real_dispute) blocks.push(`- **实际争议**：${decon.real_dispute}`);
+      if (decon.key_variables.length) blocks.push(`- **关键变量**：${decon.key_variables.join("；")}`);
+      if (decon.loud_but_minor) blocks.push(`- **响但次要**：${decon.loud_but_minor}`);
+      if (decon.silent_but_powerful) blocks.push(`- **沉默但关键**：${decon.silent_but_powerful}`);
+
+      if (formal.agents.length) {
+        blocks.push(
+          "",
+          "| 角色 | 年龄 | 身份画像 | 补充标签 | 核心利益 |",
+          "|------|------|----------|----------|----------|",
+          ...formal.agents.map(
+            (a) =>
+              `| ${a.display_name || a.id} | ${a.age || "-"} | ${a.identity || "-"} | ${a.alias || "-"} | ${a.core_interest || "-"} |`
+          )
+        );
+      }
+    }
+
+    if (formal.agents.length) {
+      blocks.push("", "## 独立思考暗房", "");
+      formal.agents.forEach((agent) => {
+        blocks.push(
+          `### ${agent.display_name || agent.id}（${agent.alias || "关键视角"}）`,
+          "",
+          `- **身份**：${agent.identity || "-"}｜**年龄**：${agent.age || "-"}`,
+          `- **核心利益**：${agent.core_interest || "-"}｜**主要顾虑**：${agent.main_fear || "-"}`,
+          "",
+          agent.content || "",
+          ""
+        );
+      });
+    }
+
+    if (formal.roundtableMarkdown) {
+      blocks.push("", "---", "", formal.roundtableMarkdown);
+    }
+
+    if (formal.directorMarkdown) {
+      blocks.push("", "---", "", formal.directorMarkdown);
+    }
+
+    return blocks.join("\n").trim() + "\n";
   }
 
   function containsProcessHintTerms(text) {
@@ -590,9 +792,14 @@
 
   const api = {
     PROCESS_HINT_TERMS,
+    ORCHESTRATION_MODE_LABELS,
+    SECTION_FOLD_SPECS,
+    matchSectionFoldRule,
+    parseDirectorSections,
     collectFormalExportData,
     collectTraceLines,
     buildExportText,
+    buildExportMarkdown,
     extractQuickSummary,
     extractReportModules,
     extractActionSuggestions,

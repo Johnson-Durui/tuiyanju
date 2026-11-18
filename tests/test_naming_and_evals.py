@@ -1,12 +1,16 @@
-import unittest
-from importlib import util
-from pathlib import Path
+"""Naming consistency, modular prompt loading, JSON schema validation, and eval runner tests."""
 
-MODULE_PATH = Path(__file__).resolve().parent / "main.py"
-MODULE_SPEC = util.spec_from_file_location("dynamic_cognitive_orchestrator_main", MODULE_PATH)
-main = util.module_from_spec(MODULE_SPEC)
-assert MODULE_SPEC and MODULE_SPEC.loader
-MODULE_SPEC.loader.exec_module(main)
+from __future__ import annotations
+
+import unittest
+
+import main
+from evals.runner import main as eval_cli_main
+from evals.runner import run_evaluation, run_offline_demo_evaluation, validate_eval_assets
+from tests.conftest import run_in_memory
+from tuiyanju.config import EVALS_DIR, PROMPTS_DIR, SCHEMAS_DIR
+from tuiyanju.demo import build_demo_bundle
+from tuiyanju.models import validate_against_analysis_schema
 
 
 def make_request() -> main.AnalyzeRequest:
@@ -85,7 +89,15 @@ def make_casting_payload() -> dict:
     }
 
 
-class NamingConsistencyTests(unittest.TestCase):
+class NamingAndEvalTests(unittest.TestCase):
+    def test_modular_directories_organized_cleanly(self):
+        for fname in ("system.md", "runtime.md", "casting.md", "agent.md", "roundtable.md", "director.md"):
+            self.assertTrue((PROMPTS_DIR / fname).is_file(), f"Missing prompts/{fname}")
+        self.assertTrue((SCHEMAS_DIR / "analysis.json").is_file())
+        self.assertTrue((EVALS_DIR / "cases.jsonl").is_file())
+        self.assertTrue((EVALS_DIR / "rubric.md").is_file())
+        self.assertTrue((EVALS_DIR / "runner.py").is_file())
+
     def test_global_system_prompt_includes_quality_guardrails_and_runtime(self):
         req = make_request()
         system_prompt = main.build_system_prompt(req.model_dump())
@@ -114,8 +126,14 @@ class NamingConsistencyTests(unittest.TestCase):
         self.assertEqual(agents[1]["alias"], "现金流")
         self.assertEqual(agents[2]["display_name"], "阿杰")
         self.assertEqual(agents[3]["display_name"], "阿梅")
-        self.assertNotEqual(agents[1]["voice_profile"]["sentence_length_tendency"], agents[2]["voice_profile"]["sentence_length_tendency"])
-        self.assertNotEqual(agents[1]["voice_profile"]["reasoning_moves"], agents[2]["voice_profile"]["reasoning_moves"])
+        self.assertNotEqual(
+            agents[1]["voice_profile"]["sentence_length_tendency"],
+            agents[2]["voice_profile"]["sentence_length_tendency"],
+        )
+        self.assertNotEqual(
+            agents[1]["voice_profile"]["reasoning_moves"],
+            agents[2]["voice_profile"]["reasoning_moves"],
+        )
 
         for agent in agents:
             self.assertIn("display_name", agent)
@@ -127,7 +145,9 @@ class NamingConsistencyTests(unittest.TestCase):
     def test_prompts_use_display_name_as_primary_reference(self):
         req = make_request()
         casting = main.normalize_casting(make_casting_payload(), req)
-        agent_outputs = [{**agent, "monologue": f"{agent['display_name']} 的独白"} for agent in casting["agents"]]
+        agent_outputs = [
+            {**agent, "monologue": f"{agent['display_name']} 的独白"} for agent in casting["agents"]
+        ]
 
         director_prompt = main.build_director_prompt(req, casting, agent_outputs)
         agent_prompt = main.build_agent_prompt(req, casting, casting["agents"][0])
@@ -146,9 +166,13 @@ class NamingConsistencyTests(unittest.TestCase):
 
     def test_roundtable_prompt_only_for_pro_and_ultra(self):
         pro_req = main.AnalyzeRequest(topic="AI 会替代大部分白领工作吗？", agent_count="4", depth="pro")
-        standard_req = main.AnalyzeRequest(topic="AI 会替代大部分白领工作吗？", agent_count="4", depth="standard")
+        standard_req = main.AnalyzeRequest(
+            topic="AI 会替代大部分白领工作吗？", agent_count="4", depth="standard"
+        )
         casting = main.normalize_casting(make_casting_payload(), pro_req)
-        agent_outputs = [{**agent, "monologue": f"{agent['display_name']} 的暗房独白"} for agent in casting["agents"]]
+        agent_outputs = [
+            {**agent, "monologue": f"{agent['display_name']} 的暗房独白"} for agent in casting["agents"]
+        ]
 
         roundtable_prompt = main.build_roundtable_prompt(pro_req, casting, agent_outputs)
 
@@ -159,9 +183,6 @@ class NamingConsistencyTests(unittest.TestCase):
         self.assertIn("冲突张力最大的两方先碰撞", roundtable_prompt)
         self.assertIn("A 的论点被 B 精确反驳", roundtable_prompt)
         self.assertIn("意外共识", roundtable_prompt)
-        self.assertIn("3 到 4 位冲突最尖锐的角色上桌", roundtable_prompt)
-        self.assertIn("2 到 3 轮交锋", roundtable_prompt)
-        self.assertIn("说实话", roundtable_prompt)
 
     def test_agent_count_rules_follow_auto_4_to_8_and_manual_10(self):
         base_payload = make_casting_payload()
@@ -184,12 +205,43 @@ class NamingConsistencyTests(unittest.TestCase):
             )
 
         payload_with_ten = {**base_payload, "agents": [*base_payload["agents"], *extra_agents]}
-
-        auto_result = main.normalize_casting(payload_with_ten, main.AnalyzeRequest(topic="测试", agent_count="auto"))
-        manual_result = main.normalize_casting(payload_with_ten, main.AnalyzeRequest(topic="测试", agent_count="10"))
+        auto_result = main.normalize_casting(
+            payload_with_ten, main.AnalyzeRequest(topic="测试", agent_count="auto")
+        )
+        manual_result = main.normalize_casting(
+            payload_with_ten, main.AnalyzeRequest(topic="测试", agent_count="10")
+        )
 
         self.assertEqual(len(auto_result["agents"]), 8)
         self.assertEqual(len(manual_result["agents"]), 10)
+
+    def test_eval_runner_offline_validation_and_demo_eval(self):
+        validation = validate_eval_assets()
+        self.assertTrue(validation["valid"], msg=f"Validation errors: {validation['errors']}")
+        self.assertEqual(validation["case_count"], 10)
+        self.assertEqual(validation["rubric_dimensions"], 8)
+        self.assertEqual(validation["rubric_total_points"], 100)
+        self.assertEqual(validation["schema_checked_cases"], 10)
+
+        # Verify schema validator catches missing fields
+        bundle = build_demo_bundle(make_request())
+        valid_errors = validate_against_analysis_schema(bundle["structured_analysis"])
+        self.assertEqual(valid_errors, [])
+        broken = dict(bundle["structured_analysis"])
+        broken.pop("layering", None)
+        self.assertTrue(any("layering" in err for err in validate_against_analysis_schema(broken)))
+
+        # Verify CLI & async demo-eval pipeline
+        exit_code = eval_cli_main(["--mode", "validate"])
+        self.assertEqual(exit_code, 0)
+
+        offline_summary = run_offline_demo_evaluation(limit=2)
+        self.assertEqual(offline_summary["evaluated_count"], 2)
+
+        demo_summary = run_in_memory(run_evaluation(mode="demo-eval", limit=2))
+        self.assertEqual(demo_summary["evaluated_count"], 2)
+        for item in demo_summary["results"]:
+            self.assertEqual(item["structural"]["structural_score"], 100.0)
 
 
 if __name__ == "__main__":

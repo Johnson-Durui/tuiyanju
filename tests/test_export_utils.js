@@ -1,11 +1,15 @@
 const assert = require("assert");
-const ExportUtils = require("./export_utils.js");
+const fs = require("fs");
+const path = require("path");
+const vm = require("vm");
+const ExportUtils = require("../export_utils.js");
 
 const sampleState = {
   topicLabel: "话题：AI 会替代大部分白领工作吗？",
   modelName: "gpt-5",
   depthLabel: "Ultra（顶配高 token）",
   audienceLabel: "普通读者",
+  orchestrationMode: "multi_agent",
   moduleLabels: ["谁会占便宜，谁会吃亏"],
   issueType: "复合型",
   conflictAxes: ["利益分配", "风险承担"],
@@ -44,6 +48,7 @@ const sampleState = {
 const normalExport = ExportUtils.buildExportText(sampleState, { includeTrace: false });
 assert(!normalExport.includes("【推演过程提示】"));
 assert(!ExportUtils.containsProcessHintTerms(normalExport));
+assert(normalExport.includes("编排引擎：真·多Agent并发隔离"));
 assert(normalExport.includes("【圆桌激辩】"));
 assert(normalExport.includes("我不同意把这事说成谁努力谁赢"));
 
@@ -51,10 +56,20 @@ const traceExport = ExportUtils.buildExportText(sampleState, { includeTrace: tru
 assert(traceExport.includes("【推演过程提示】"));
 assert(traceExport.includes("正在校验中转站配置"));
 
+const mdExport = ExportUtils.buildExportMarkdown(sampleState, { includeTrace: false });
+assert(mdExport.includes("# 推演局正式报告：AI 会替代大部分白领工作吗？"));
+assert(mdExport.includes("- **编排引擎**：真·多Agent并发隔离"));
+assert(mdExport.includes("| 小红 | 29岁 | 互联网运营 | 转行焦虑白领 | 保住收入 |"));
+assert(!mdExport.includes("## 推演过程提示"));
+
+const mdTraceExport = ExportUtils.buildExportMarkdown(sampleState, { includeTrace: true });
+assert(mdTraceExport.includes("## 推演过程提示"));
+
 const formalOnly = ExportUtils.collectFormalExportData(sampleState);
 assert.strictEqual(formalOnly.processLines, undefined);
 assert.strictEqual(formalOnly.topicLabel, sampleState.topicLabel);
 assert.strictEqual(formalOnly.roundtableMarkdown, sampleState.roundtableMarkdown);
+assert.strictEqual(formalOnly.orchestrationLabel, "真·多Agent并发隔离");
 
 const shortVideoState = {
   topicLabel: "话题：短视频对年轻人的影响大不大",
@@ -181,4 +196,27 @@ assert(sharePacket.directorHighlights.some((item) => item.title === "嗓门与�
 assert.strictEqual(sharePacket.actionSuggestions.length, 3);
 assert(sharePacket.actionSuggestions[0].text.includes("给年轻人先减压"));
 
-console.log("export utils ok");
+// Broadened section-folding heading matcher tests
+assert.strictEqual(ExportUtils.matchSectionFoldRule("Agent 独立发言")?.key, "darkroom");
+assert.strictEqual(ExportUtils.matchSectionFoldRule("三、各 Agent 暗房观点")?.key, "darkroom");
+assert.strictEqual(ExportUtils.matchSectionFoldRule("二、召唤阵容与角色列表")?.key, "casting");
+assert.strictEqual(ExportUtils.matchSectionFoldRule("圆桌交锋")?.key, "roundtable");
+assert.strictEqual(ExportUtils.matchSectionFoldRule("局长总结")?.key, "director");
+assert.strictEqual(ExportUtils.matchSectionFoldRule("五、可执行建议")?.key, "actions");
+assert.strictEqual(ExportUtils.matchSectionFoldRule("六、事实与推断分层")?.key, "layering");
+assert.strictEqual(ExportUtils.matchSectionFoldRule("模块 A：赢家 / 输家地图")?.key, "enhancements");
+
+// Syntax-check inline <script> inside index.html
+const htmlPath = path.resolve(__dirname, "..", "index.html");
+const htmlContent = fs.readFileSync(htmlPath, "utf8");
+const inlineScripts = [...htmlContent.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)];
+assert(inlineScripts.length >= 1, "Expected inline script in index.html");
+for (const match of inlineScripts) {
+  new vm.Script(match[1], { filename: "index.html#inline-script" });
+}
+assert(htmlContent.includes("setOrchestrationMode('multi_agent')"));
+assert(htmlContent.includes("captureContainerFoldState"));
+assert(htmlContent.includes("restoreContainerFoldState"));
+assert(htmlContent.includes("scheduleRender"));
+
+console.log("export utils & frontend syntax checks ok");

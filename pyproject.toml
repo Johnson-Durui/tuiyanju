@@ -1,0 +1,28 @@
+[project]
+name = "tuiyanju"
+version = "2.0.0"
+description = "推演局 · Dynamic Cognitive Orchestrator — True Multi-Agent Cognitive Deduction Terminal"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = [
+    "fastapi>=0.100.0",
+    "httpx>=0.25.0",
+    "openai>=1.0.0",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "uvicorn>=0.23.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]

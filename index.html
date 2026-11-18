@@ -1589,6 +1589,24 @@
           <button class="quick-topic" onclick="st('AI 会不会替代大部分白领岗位')">AI 会替代白领吗</button>
           <button class="quick-topic" onclick="st('现在适不适合辞职创业')">现在适合辞职创业吗</button>
         </div>
+        <div class="mode-bar" id="modeBar" role="radiogroup" aria-label="推演编排模式">
+          <span class="mode-bar-label">编排引擎</span>
+          <div class="mode-pills">
+            <button type="button" class="mode-pill is-active" data-mode="multi_agent" onclick="setOrchestrationMode('multi_agent')">
+              <strong>真·多Agent并发隔离</strong>
+              <small>独立暗房并发 · 零串味</small>
+            </button>
+            <button type="button" class="mode-pill" data-mode="single_stream" onclick="setOrchestrationMode('single_stream')">
+              <strong>极速单流推演</strong>
+              <small>低 Token · 单次快推</small>
+            </button>
+            <button type="button" class="mode-pill" data-mode="demo" onclick="setOrchestrationMode('demo')">
+              <strong>离线演示</strong>
+              <small>零 API Key · 即刻体验</small>
+            </button>
+          </div>
+          <span class="api-health-hint" id="apiHealthHint"></span>
+        </div>
       </div>
       <div class="primary-actions">
         <button class="btn-launch" id="lb" onclick="go()">启动推演</button>
@@ -1597,8 +1615,11 @@
     </div>
     <div class="launch-status" id="launchStatus" aria-live="polite">
       <div class="launch-status-text" id="launchStatusLabel">正在拆解冲突结构…</div>
-      <div class="launch-dots" aria-hidden="true">
-        <span></span><span></span><span></span>
+      <div class="launch-status-right">
+        <div class="launch-dots" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </div>
+        <button type="button" class="btn-stop-inline" id="cbInline" onclick="cancelRun()">中止推演</button>
       </div>
     </div>
     <div class="adv-shell">
@@ -1632,6 +1653,9 @@
               <div class="control-card-copy">定义这次推演的算力气质和召唤规模，让速度、成本和质量各归其位。</div>
             </div>
             <div class="field-grid single">
+              <div class="opt-group"><label>编排模式</label>
+                <select id="omode" onchange="setOrchestrationMode(this.value)"><option value="multi_agent">真·多Agent并发隔离（推荐）</option><option value="single_stream">极速单流推演（低 Token 快推）</option><option value="demo">离线演示（零 API Key 体验）</option></select>
+              </div>
               <div class="opt-group"><label>模型</label>
                 <select id="ms"><option value="claude-opus-4-6-thinking">Claude Opus 4.6 Thinking（推荐）</option><option value="claude-opus-4-6">Claude Opus 4.6</option><option value="claude-sonnet-4-6">Claude Sonnet 4.6（更快）</option><option value="gpt-5">GPT-5</option><option value="gpt-4o">GPT-4o</option><option value="gpt-4o-mini">GPT-4o-mini（快）</option><option value="gpt-4-turbo">GPT-4-turbo</option></select>
               </div>
@@ -1700,7 +1724,7 @@
 
       <div class="stage-panel reveal-on-scroll" id="apanel" data-progress-stage="monologue">
         <div class="stage-head">独立思考暗房</div>
-        <div class="agent-note">这里按顺序展开每位 Agent 的隔离暗房独白。每张角色卡都是一个处境、一个情绪口径、一种行动倾向。</div>
+        <div class="agent-note">这里并发呈现每位 Agent 的物理上下文隔离独白。每张角色卡只掌握自身利益与认知局限，彼此零串味。</div>
         <div class="agent-grid" id="ag"></div>
       </div>
 
@@ -1742,6 +1766,7 @@
         <div class="rail-title">导出与操作</div>
         <div class="act-bar" id="ab">
           <button class="btn-s" onclick="cp(event)">复制报告</button>
+          <button class="btn-s" onclick="exportMd()">导出 Markdown</button>
           <button class="btn-s" onclick="exportTxt()">导出 TXT</button>
           <button class="btn-s" onclick="exportTxt(true)">导出 TXT+过程</button>
           <button class="btn-s" id="pdfBtn" onclick="exportPdf(event,'full')">导出完整 PDF</button>
@@ -1771,10 +1796,10 @@
   </div>
 </div>
 <script>
-const API='http://localhost:8000';
+const API=(window.location.protocol==='http:'||window.location.protocol==='https:')?window.location.origin:'http://127.0.0.1:8000';
 const ExportUtils=window.TuYanJuExportUtils;
 let t0,ti,md='',roundtableMd='',mods=new Set(),ctl=null,renderTimer=null,renderPending=false,renderPendingLive=false,roundtableRenderTimer=null,roundtableRenderPending=false,roundtableRenderPendingLive=false,agentRenderTimer=null,abortSilently=false;
-let castingData=null,agentStates=new Map(),agentOrder=[],currentReportId='';
+let castingData=null,agentStates=new Map(),agentOrder=[],currentReportId='',orchestrationMode='multi_agent',resolvedOrchestrationMode='multi_agent',serverApiConfigured=true;
 const pendingAgentRenders=new Set();
 const reducedMotion=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const quickTopics=['短视频对年轻人的影响大不大？','AI 会不会替代大部分白领岗位？','现在适不适合辞职创业？'];
@@ -1789,13 +1814,162 @@ let castingRenderToken=0,castingRenderTimer=null;
 const moduleLabels={winners:'谁会占便宜，谁会吃亏',timeline:'这件事接下来会怎么发展',signal:'网上热闹和真实关键分别是什么',action:'下一步谁最可能先出手',monitor:'后面该盯哪些变化信号',appendix:'把重点整理成清单'};
 const depthLabels={quick:'快照',standard:'标准',pro:'Pro（更深入）',ultra:'Ultra（顶配高 token）',deep:'Pro（更深入）',flagship:'Ultra（顶配高 token）'};
 const audienceLabels={general:'普通读者',manager:'管理层',investor:'投资人',researcher:'研究人员',creator:'内容创作者'};
+const modeLabels={multi_agent:'真·多Agent并发隔离',single_stream:'极速单流推演',demo:'内置离线演示'};
+const modeMetaDescriptions={
+  multi_agent:'True Multi-Agent · Concurrent Isolated Darkrooms + Roundtable',
+  single_stream:'Rapid Single-Stream · Low-Token Streaming Synthesis',
+  demo:'Offline Demo Engine · Zero-Key Deterministic Simulation',
+};
 const REPORT_PRODUCT_META=Object.freeze({
-  systemVersion:'DCO PDF 1.5',
-  promptVersion:'Prompt Stack 2026.04 Final',
-  orchestrationMode:'True Multi-Agent · Sequential Monologues + Roundtable',
-  schemaVersion:'analysis.json v1 · export schema v2',
+  systemVersion:'DCO 2.0',
+  promptVersion:'Prompt Stack 2026.04 Modular',
+  orchestrationMode:'True Multi-Agent · Concurrent Isolated Darkrooms',
+  schemaVersion:'schemas/analysis.json v1 · export schema v2',
 });
 const $=id=>document.getElementById(id);
+function parseMarkdownSafe(source){
+  const raw=String(source||'');
+  if(!raw.trim())return'';
+  if(window.marked&&typeof window.marked.parse==='function'){
+    return window.marked.parse(raw);
+  }
+  const formatInline=txt=>escapeHtml(txt)
+    .replace(/`([^`]+)`/g,'<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*([^*]+)\*/g,'<em>$1</em>');
+  const lines=raw.replace(/\r/g,'').split('\n');
+  const out=[];
+  let inList=false;
+  const closeList=()=>{if(inList){out.push('</ul>');inList=false}};
+  for(const line of lines){
+    const trimmed=line.trim();
+    if(!trimmed){closeList();continue}
+    if(/^---+$/.test(trimmed)){closeList();out.push('<hr>');continue}
+    const hm=trimmed.match(/^(#{1,4})\s+(.+)$/);
+    if(hm){
+      closeList();
+      const lvl=hm[1].length;
+      out.push(`<h${lvl}>${formatInline(hm[2])}</h${lvl}>`);
+      continue;
+    }
+    if(/^>\s*/.test(trimmed)){
+      closeList();
+      out.push(`<blockquote>${formatInline(trimmed.replace(/^>\s*/,''))}</blockquote>`);
+      continue;
+    }
+    if(/^[-*+]\s+/.test(trimmed)||/^\d+[.、]\s+/.test(trimmed)){
+      if(!inList){out.push('<ul>');inList=true}
+      out.push(`<li>${formatInline(trimmed.replace(/^(?:[-*+]|\d+[.、])\s+/,''))}</li>`);
+      continue;
+    }
+    closeList();
+    out.push(`<p>${formatInline(trimmed)}</p>`);
+  }
+  closeList();
+  return out.join('\n');
+}
+function captureContainerFoldState(container){
+  const state=new Map();
+  if(!container)return state;
+  container.querySelectorAll('details[data-fold-key]').forEach(el=>{
+    state.set(`details:${el.dataset.foldKey}`,Boolean(el.open));
+  });
+  container.querySelectorAll('.director-card[data-card-key]').forEach(el=>{
+    state.set(`card:${el.dataset.cardKey}`,el.classList.contains('is-open'));
+  });
+  return state;
+}
+function restoreContainerFoldState(container,state){
+  if(!container||!state||!state.size)return false;
+  let restoredAny=false;
+  container.querySelectorAll('details[data-fold-key]').forEach(el=>{
+    const key=`details:${el.dataset.foldKey}`;
+    if(state.has(key)){
+      el.open=Boolean(state.get(key));
+      restoredAny=true;
+    }
+  });
+  const cards=[...container.querySelectorAll('.director-card[data-card-key]')];
+  const hasSavedCard=cards.some(el=>state.has(`card:${el.dataset.cardKey}`));
+  if(hasSavedCard){
+    cards.forEach(el=>{
+      const open=Boolean(state.get(`card:${el.dataset.cardKey}`));
+      const body=el.querySelector('.director-body');
+      el.classList.toggle('is-open',open);
+      if(body){
+        body.style.maxHeight=open?`${body.scrollHeight}px`:'0px';
+        body.style.opacity=open?'1':'0';
+      }
+    });
+    restoredAny=true;
+  }
+  return restoredAny;
+}
+function wrapCollapsibleSections(root,forceDefaultOpen=null){
+  if(!root||!ExportUtils?.matchSectionFoldRule)return;
+  const headings=[...root.querySelectorAll('h1,h2')];
+  let seq=0;
+  for(const heading of headings){
+    if(!heading.parentNode||heading.closest('details.report-fold'))continue;
+    const rule=ExportUtils.matchSectionFoldRule(heading.textContent||'');
+    if(!rule)continue;
+    const level=Number(heading.tagName.slice(1))||2;
+    const details=document.createElement('details');
+    details.className='report-fold';
+    const uniqueKey=`${rule.key}-${seq++}`;
+    details.dataset.foldKey=uniqueKey;
+    details.open=forceDefaultOpen!==null?Boolean(forceDefaultOpen):Boolean(rule.defaultOpen);
+    const summary=document.createElement('summary');
+    summary.className='report-fold-summary';
+    summary.innerHTML=`<span class="report-fold-title">${escapeHtml(heading.textContent||'')}</span><span class="report-fold-tag">${escapeHtml(rule.label)}</span>`;
+    const body=document.createElement('div');
+    body.className='report-fold-body';
+    heading.parentNode.insertBefore(details,heading);
+    details.appendChild(summary);
+    details.appendChild(body);
+    let cursor=details.nextSibling;
+    heading.remove();
+    while(cursor){
+      const next=cursor.nextSibling;
+      if(cursor.nodeType===1&&/^H[1-2]$/.test(cursor.tagName)){
+        const nextLevel=Number(cursor.tagName.slice(1))||2;
+        if(nextLevel<=level)break;
+      }
+      body.appendChild(cursor);
+      cursor=next;
+    }
+  }
+}
+function setOrchestrationMode(mode){
+  const valid=['multi_agent','single_stream','demo'];
+  orchestrationMode=valid.includes(mode)?mode:'multi_agent';
+  if(!ctl)resolvedOrchestrationMode=orchestrationMode;
+  document.querySelectorAll('.mode-pill[data-mode]').forEach(btn=>{
+    const active=btn.dataset.mode===orchestrationMode;
+    btn.classList.toggle('is-active',active);
+    btn.setAttribute('aria-checked',active?'true':'false');
+  });
+  const sel=$('omode');
+  if(sel&&sel.value!==orchestrationMode)sel.value=orchestrationMode;
+  updateReportChrome();
+}
+async function loadServerHealth(){
+  try{
+    const res=await fetch(`${API}/api/health`);
+    if(!res.ok)return;
+    const data=await res.json();
+    serverApiConfigured=Boolean(data.api_configured);
+    const hint=$('apiHealthHint');
+    if(!serverApiConfigured){
+      ss('ready','DEMO READY');
+      if(hint)hint.textContent='未检测到 API Key · 自动启用内置离线演示';
+    }else{
+      ss('ready','READY');
+      if(hint)hint.textContent='API 通道已就绪';
+    }
+    updateReportChrome();
+  }catch(_err){}
+}
 function escapeAttr(text){return escapeHtml(text).replaceAll("'",'&#39;')}
 function hashIndex(text,mod=bubblePalette.length){
   const source=String(text||'未命名角色');
@@ -2189,14 +2363,35 @@ function computeInfluenceScore(agent,type='power'){
 }
 function buildDirectorAccordion(markdown){
   const sections=splitMarkdownSections(markdown);
+  const usedTitles=new Set();
+  const pickTracked=patterns=>{
+    const matched=sections.filter(section=>patterns.some(pattern=>pattern.test(section.title)));
+    matched.forEach(section=>usedTitles.add(section.title));
+    if(!matched.length)return'';
+    return matched.map(section=>`### ${section.title}\n${section.content}`).join('\n\n');
+  };
   const cards=[
-    {key:'conflict',icon:'🧩',title:'争的是什么',subtitle:'表层冲突与真实争议',markdown:pickDirectorMarkdown(sections,[/表层冲突/,/共识地带/,/实际争议/])},
-    {key:'fear',icon:'😰',title:'怕的是什么',subtitle:'深层动力与错位成本',markdown:pickDirectorMarkdown(sections,[/深层动力/,/断层与错位/,/风险/])},
-    {key:'voice',icon:'📢',title:'谁声音最大',subtitle:'舆论热度与可见压力',markdown:pickDirectorMarkdown(sections,[/嗓门与筹码/,/表层冲突/])},
-    {key:'power',icon:'🃏',title:'谁手里有牌',subtitle:'隐藏变量与未来触发器',markdown:pickDirectorMarkdown(sections,[/隐藏变量/,/未来触发器/,/嗓门与筹码/])},
-    {key:'judgement',icon:'🔮',title:'局长判断',subtitle:'立体真相与行动建议',markdown:pickDirectorMarkdown(sections,[/立体真相/,/行动建议/,/事实层/,/推断层/,/情绪层/])||markdown},
+    {key:'conflict',icon:'🧩',title:'争的是什么',subtitle:'话题解构、表层冲突与共识地带',markdown:pickTracked([/话题解构|议题拆解/,/表层冲突/,/共识地带/,/实际争议/])},
+    {key:'fear',icon:'😰',title:'怕的是什么',subtitle:'深层动力与断层错位成本',markdown:pickTracked([/深层动力/,/断层|错位/,/风险/])},
+    {key:'voice',icon:'📢',title:'谁声音最大',subtitle:'舆论热度、声量与筹码分布',markdown:pickTracked([/嗓门|筹码/])},
+    {key:'power',icon:'🃏',title:'谁手里有牌',subtitle:'隐藏变量与未来反转触发器',markdown:pickTracked([/隐藏变量/,/未来触发器|触发器/])},
+    {key:'judgement',icon:'🔮',title:'局长判断与建议',subtitle:'立体真相、行动建议与事实分层',markdown:pickTracked([/立体真相|真相/,/行动建议|落地建议|可执行建议/,/事实.*推断|事实分层|认知分层|情绪分层/])},
   ];
-  return cards;
+  const remaining=sections.filter(section=>!usedTitles.has(section.title)&&!/^局长整合报告$/i.test(section.title)&&section.content.trim());
+  if(remaining.length){
+    cards.push({
+      key:'enhancements',
+      icon:'🛰️',
+      title:'增强透镜与延伸推演',
+      subtitle:'激活模块与补充观察清单',
+      markdown:remaining.map(section=>`### ${section.title||'补充分析'}\n${section.content}`).join('\n\n'),
+    });
+  }
+  const nonEmpty=cards.filter(card=>card.markdown&&card.markdown.trim());
+  if(!nonEmpty.length){
+    return [{key:'judgement',icon:'🔮',title:'局长判断',subtitle:'完整推演正文',markdown}];
+  }
+  return nonEmpty;
 }
 function buildPowerMatrix(agents){
   const nodes=agents.map(agent=>{
@@ -2212,23 +2407,30 @@ function buildPowerMatrix(agents){
   });
   return `<div class="power-matrix"><div class="matrix-head"><div><div class="matrix-title">谁声音大，谁手里有牌</div><div class="matrix-copy">把角色放进声量 × 筹码的 2×2 矩阵里，快速看清主导者、呐喊者、隐藏玩家和沉默承受者。</div></div></div><div class="matrix-grid"><div class="matrix-quadrant"><strong>主导者</strong><span>声音大，也真正有牌</span></div><div class="matrix-quadrant"><strong>呐喊者</strong><span>最容易被看到，但未必改得动</span></div><div class="matrix-quadrant"><strong>隐藏玩家</strong><span>不一定出声，但能左右结局</span></div><div class="matrix-quadrant"><strong>沉默承受者</strong><span>最容易被影响，却最难控制局面</span></div><div class="matrix-node-layer">${nodes.map(node=>`<div class="matrix-node" style="left:${node.left};top:${node.top};border-color:${node.color};box-shadow:0 0 16px ${node.color}22">${escapeHtml(node.emoji)} ${escapeHtml(node.name)}</div>`).join('')}</div></div><div class="matrix-axis"><span>Y 轴：有牌 ↔ 没牌</span><span>X 轴：声量大 ↔ 声量小</span></div></div>`;
 }
-function bindDirectorAccordion(){
+function bindDirectorAccordion(savedState=null){
   const items=[...$('oc').querySelectorAll('.director-card')];
-  const openIndex=index=>{
+  const toggleIndex=index=>{
     items.forEach((item,itemIndex)=>{
       const body=item.querySelector('.director-body');
-      const open=itemIndex===index;
-      item.classList.toggle('is-open',open);
-      if(body){
-        body.style.maxHeight=open?`${body.scrollHeight}px`:'0px';
-        body.style.opacity=open?'1':'0';
+      if(itemIndex===index){
+        const nextOpen=!item.classList.contains('is-open');
+        item.classList.toggle('is-open',nextOpen);
+        if(body){
+          body.style.maxHeight=nextOpen?`${body.scrollHeight}px`:'0px';
+          body.style.opacity=nextOpen?'1':'0';
+        }
       }
     });
   };
   items.forEach((item,index)=>{
-    item.querySelector('.director-trigger')?.addEventListener('click',()=>openIndex(index));
+    item.querySelector('.director-trigger')?.addEventListener('click',()=>toggleIndex(index));
   });
-  if(items.length)openIndex(0);
+  if(savedState&&restoreContainerFoldState($('oc'),savedState))return;
+  if(items.length){
+    const first=items[0],body=first.querySelector('.director-body');
+    first.classList.add('is-open');
+    if(body){body.style.maxHeight=`${body.scrollHeight}px`;body.style.opacity='1'}
+  }
 }
 function getActiveModuleLabels(){return[...mods].map(id=>moduleLabels[id]||id)}
 function st(v){$('ti').value=v;$('ti').focus()}
@@ -2251,6 +2453,10 @@ function setRunState(running){
   $('lb').textContent=running?'系统推演中':'启动推演';
   $('cb').style.display=running?'block':'none';
   $('cb').disabled=!running;
+  if($('cbInline')){
+    $('cbInline').style.display=running?'inline-flex':'none';
+    $('cbInline').disabled=!running;
+  }
   $('launchStatus').classList.toggle('on',running||document.body.classList.contains('run-active'));
   updateReportChrome();
 }
@@ -2335,6 +2541,7 @@ function renderStatusMetrics(){
   const statusLabel=ctl?'推演进行中':(String(formalData.directorMarkdown||'').trim()?'报告已生成':(castingData?'推演准备中':'待命'));
   const rows=[
     ['状态',statusLabel],
+    ['编排引擎',modeLabels[resolvedOrchestrationMode]||modeLabels[orchestrationMode]||'真·多Agent并发隔离'],
     ['当前话题',topicText],
     ['模型',formalData.modelName||'未指定'],
     ['深度',formalData.depthLabel||'标准'],
@@ -2509,21 +2716,30 @@ function renderAgentCard(agentId){
   }
   card.innerHTML=`<div class="agent-header"><div><div class="agent-title">${escapeHtml(getAgentDisplayName(agent))}</div><div class="agent-role">${escapeHtml(getAgentIdentityLine(agent)||'身份信息待补充')}</div></div><span class="agent-status ${agentStatusClass(agent)}">${escapeHtml(agent.status||'待命')}</span></div><div class="agent-summary"><div class="agent-chip">${escapeHtml(getAgentEmoji(agent))} ${escapeHtml(getAgentAlias(agent)||'关键视角')}</div>${(agent.dimensions||[]).length?`<div class="agent-chip">观察维度：${escapeHtml((agent.dimensions||[]).join(' · '))}</div>`:''}${agent.core_interest?`<div class="agent-chip">核心利益：${escapeHtml(agent.core_interest)}</div>`:''}</div><div class="agent-body"><div class="agent-facts">${agent.info_type?`<div class="agent-fact"><b>信息来源：</b>${escapeHtml(agent.info_type)}</div>`:''}${agent.why_selected?`<div class="agent-fact"><b>为什么上场：</b>${escapeHtml(agent.why_selected)}</div>`:''}${agent.blind_spot?`<div class="agent-fact"><b>盲点：</b>${escapeHtml(agent.blind_spot)}</div>`:''}${agent.main_fear?`<div class="agent-fact"><b>潜在顾虑：</b>${escapeHtml(agent.main_fear)}</div>`:''}</div><div class="agent-mono">${escapeHtml(deriveAgentPreview(agent.content||''))}</div></div><div class="agent-actions"><button class="agent-enter" onclick='openDarkroom(${JSON.stringify(agentId)})'>进入暗房</button><span class="agent-read">${readAgentIds.has(agentId)?'✓ 已读暗房':''}</span></div>`;
   if(agent.content)card.dataset.ready='true';
-  if(isNew)requestAnimationFrame(()=>{card.scrollIntoView({block:'nearest',behavior:reducedMotion?'auto':'smooth',inline:'center'});updateAgentCarouselFocus(agentId)});
+  if(isNew&&!activeAgentCardId)requestAnimationFrame(()=>{updateAgentCarouselFocus(agentId)});
   else updateAgentCarouselFocus(activeAgentCardId||agentId);
   setProgressStep('monologue');
   if(isNew||agent.done||agent.error)updateReportChrome();
 }
 function renderDirectorOutput(live=false){
   $('dpanel').classList.add('on');
-  if(live){
-    $('oc').innerHTML=`<div class="live-reading-shell"><div class="live-reading-label">局长正在拼接最终结构图</div><div class="live-reading-body">${marked.parse(md||'') || '<p>正在汇总各方材料…</p>'}<span class="cursor"></span></div></div>`;
+  const savedFoldState=captureContainerFoldState($('oc'));
+  if(live||resolvedOrchestrationMode==='single_stream'){
+    const temp=document.createElement('div');
+    temp.innerHTML=parseMarkdownSafe(md||'')||'<p>正在汇总各方材料…</p>';
+    wrapCollapsibleSections(temp);
+    const labelText=live
+      ?(resolvedOrchestrationMode==='single_stream'?'极速单流推演流式输出中（支持随时展开/折叠章节）':'局长正在拼接最终结构图（支持随时展开/折叠章节）')
+      :'极速单流推演报告 · 章节折叠阅读视图';
+    $('oc').innerHTML=`<div class="live-reading-shell"><div class="live-reading-label">${escapeHtml(labelText)}</div><div class="live-reading-body">${temp.innerHTML}${live?'<span class="cursor"></span>':''}</div></div>`;
+    restoreContainerFoldState($('oc'),savedFoldState);
     setProgressStep('director');
+    if(!live)updateReportChrome();
     return;
   }
   const cards=buildDirectorAccordion(md||'');
-  $('oc').innerHTML=`<div class="director-accordion">${cards.map((card,index)=>`<article class="director-card"><button class="director-trigger" data-index="${index}"><span class="director-trigger-left"><span>${escapeHtml(card.icon)}</span><span>${escapeHtml(card.title)}</span></span><span>${escapeHtml(card.subtitle)}</span></button><div class="director-body"><div class="director-body-inner">${card.markdown?marked.parse(card.markdown):'<p>局长还在整合这一部分内容。</p>'}${live&&index===cards.length-1?'<span class="cursor"></span>':''}</div></div></article>`).join('')}</div>${buildPowerMatrix(getFormalExportState().agents||[])}`;
-  bindDirectorAccordion();
+  $('oc').innerHTML=`<div class="director-accordion">${cards.map((card,index)=>`<article class="director-card" data-card-key="${escapeAttr(card.key)}"><button class="director-trigger" data-index="${index}"><span class="director-trigger-left"><span>${escapeHtml(card.icon)}</span><span>${escapeHtml(card.title)}</span></span><span>${escapeHtml(card.subtitle)}</span></button><div class="director-body"><div class="director-body-inner">${card.markdown?parseMarkdownSafe(card.markdown):'<p>局长还在整合这一部分内容。</p>'}</div></div></article>`).join('')}</div>${buildPowerMatrix(getFormalExportState().agents||[])}`;
+  bindDirectorAccordion(savedFoldState);
   registerRevealNodes($('dpanel'));
   setProgressStep('director');
   updateReportChrome();
@@ -2538,7 +2754,9 @@ function renderRoundtableOutput(live=false){
   $('rtpanel').classList.add('on');
   roundtableEntriesCache=parseRoundtableEntries(roundtableMd||'');
   if(live){
-    $('rc').innerHTML=`<div class="live-reading-shell live-reading-shell-roundtable"><div class="live-reading-label">圆桌正在推进中</div><div class="live-reading-body">${marked.parse(roundtableMd||'') || '<p>各方正在接招…</p>'}<span class="cursor"></span></div></div>`;
+    const savedState=captureContainerFoldState($('rc'));
+    $('rc').innerHTML=`<div class="live-reading-shell live-reading-shell-roundtable"><div class="live-reading-label">圆桌正在推进中</div><div class="live-reading-body">${parseMarkdownSafe(roundtableMd||'') || '<p>各方正在接招…</p>'}<span class="cursor"></span></div></div>`;
+    restoreContainerFoldState($('rc'),savedState);
     setProgressStep('roundtable');
     return;
   }
@@ -2570,9 +2788,11 @@ function getFormalExportState(){
   }));
   return {
     topicLabel:$('tb').textContent||'',
-    modelName:$('ms').value||'',
+    modelName:resolvedOrchestrationMode==='demo'?'Built-in Demo Engine':($('ms').value||''),
     depthLabel:depthLabels[$('depth').value]||$('depth').value||'',
     audienceLabel:audienceLabels[$('aud').value]||$('aud').value||'',
+    orchestrationMode:resolvedOrchestrationMode||orchestrationMode,
+    orchestrationLabel:modeLabels[resolvedOrchestrationMode]||modeLabels[orchestrationMode]||'真·多Agent并发隔离',
     moduleLabels:getActiveModuleLabels(),
     issueType:castingData?.issue_type||'',
     conflictAxes:Array.isArray(castingData?.conflict_axes)?[...castingData.conflict_axes]:[],
@@ -2592,6 +2812,9 @@ function getFormalExportState(){
 function buildExportText(includeTrace=false){
   return ExportUtils.buildExportText(getFormalExportState(),{includeTrace});
 }
+function buildExportMarkdown(includeTrace=false){
+  return ExportUtils.buildExportMarkdown(getFormalExportState(),{includeTrace});
+}
 function exportTxt(includeTrace=false){
   const topic=sanitizeFileName((($('tb').textContent||'').replace(/^话题：/,'')));
   const blob=new Blob([buildExportText(includeTrace)],{type:'text/plain;charset=utf-8'});
@@ -2599,6 +2822,18 @@ function exportTxt(includeTrace=false){
   const a=document.createElement('a');
   a.href=url;
   a.download=`推演局-${topic}${includeTrace?'-含过程':''}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+function exportMd(includeTrace=false){
+  const topic=sanitizeFileName((($('tb').textContent||'').replace(/^话题：/,'')));
+  const blob=new Blob([buildExportMarkdown(includeTrace)],{type:'text/markdown;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download=`推演局-${topic}${includeTrace?'-含过程':''}.md`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -2614,11 +2849,12 @@ function buildPdfDocumentMarkup(formalData,traceLines,exportedAt,exportMode='ful
   const sharePacket=ExportUtils.extractSharePacket(formalData);
   const reportId=currentReportId||buildReportId(formalData,exportedAt);
   const isShare=exportMode==='share';
+  const activeOrchDesc=modeMetaDescriptions[formalData.orchestrationMode||resolvedOrchestrationMode]||REPORT_PRODUCT_META.orchestrationMode;
   const coverMetaFields=[
     ['Report ID',reportId],
     ['System Version',REPORT_PRODUCT_META.systemVersion],
     ['Prompt Version',REPORT_PRODUCT_META.promptVersion],
-    ['Orchestration Mode',REPORT_PRODUCT_META.orchestrationMode],
+    ['Orchestration Mode',activeOrchDesc],
     ['Schema Version',REPORT_PRODUCT_META.schemaVersion],
   ];
   const coverModeBadge=isShare?'Share Edition · 传播导出版':'Full Edition · 正式完整版';
@@ -2650,8 +2886,8 @@ function buildPdfDocumentMarkup(formalData,traceLines,exportedAt,exportMode='ful
   const processSection=`<section class="pdf-page"><div class="section-tag">PROCESS TRACE</div><h2>推演过程提示</h2><div class="pdf-card"><ul class="process-list">${processHtml}</ul></div></section>`;
   const castingSection=`<section class="pdf-page"><div class="section-tag">CASTING BOARD</div><h2>选角总览</h2><div class="meta-line">议题类型：${escapeHtml(formalData.issueType||'未判定')}</div><div class="meta-line">冲突轴：${escapeHtml((formalData.conflictAxes||[]).join('；')||'未判定')}</div><table class="pdf-table"><thead><tr><th>角色</th><th>身份画像</th><th>核心信息</th></tr></thead><tbody>${(formalData.agents||[]).map(agent=>`<tr><td><strong>${escapeHtml(agent.display_name||agent.id)}</strong><div class="cell-sub">${escapeHtml(agent.age||'')}</div></td><td>${escapeHtml(agent.identity||'')}<div class="cell-sub">${escapeHtml(agent.why_selected?`为什么上场：${agent.why_selected}`:'')}</div></td><td>${escapeHtml(agent.alias||'关键视角')}<div class="cell-sub">${escapeHtml((agent.dimensions||[]).join(' · ')||'')}</div></td></tr>`).join('')}</tbody></table><div class="decon-stack">${deconRows.map(([label,value])=>`<div class="pdf-card compact-card"><h3>${escapeHtml(label)}</h3><p>${escapeHtml(value||'未补充')}</p></div>`).join('')}</div></section>`;
   const agentSection=`<section class="pdf-page"><div class="section-tag">AGENT MONOLOGUES</div><h2>独立思考暗房</h2>${(formalData.agents||[]).map(agent=>`<article class="pdf-card agent-entry"><h3>${escapeHtml(agent.display_name||agent.id)}</h3><div class="agent-meta">身份：${escapeHtml(agent.identity||'')}</div><div class="agent-meta">补充标签：${escapeHtml(agent.alias||'关键视角')}</div><div class="agent-meta">核心利益：${escapeHtml(agent.core_interest||'')}</div><div class="agent-meta">主要顾虑：${escapeHtml(agent.main_fear||'')}</div><p>${escapeHtml(agent.content||'').replaceAll('\n','<br>')}</p></article>`).join('')}</section>`;
-  const roundtableSection=formalData.roundtableMarkdown?`<section class="pdf-page"><div class="section-tag">ROUNDTABLE</div><h2>圆桌激辩</h2><div class="pdf-card rich-report">${marked.parse(formalData.roundtableMarkdown||'')}</div></section>`:'';
-  const reportSection=`<section class="pdf-page"><div class="section-tag">DIRECTOR REPORT</div><h2>局长整合报告</h2><div class="pdf-card rich-report">${marked.parse(formalData.directorMarkdown||'')}</div></section>`;
+  const roundtableSection=formalData.roundtableMarkdown?`<section class="pdf-page"><div class="section-tag">ROUNDTABLE</div><h2>圆桌激辩</h2><div class="pdf-card rich-report">${parseMarkdownSafe(formalData.roundtableMarkdown||'')}</div></section>`:'';
+  const reportSection=`<section class="pdf-page"><div class="section-tag">DIRECTOR REPORT</div><h2>局长整合报告</h2><div class="pdf-card rich-report">${parseMarkdownSafe(formalData.directorMarkdown||'')}</div></section>`;
   const shareCastingSection=`<section class="pdf-page share-page"><div class="section-tag">SHARE CASTING</div><h2>选角总览 · 压缩版</h2><div class="share-note">保留本次最关键的人物位置关系和暗房里最有代表性的句子，方便转发时快速建立代入感。</div><table class="pdf-table share-casting-table"><thead><tr><th>角色</th><th>身份画像</th><th>核心视角</th></tr></thead><tbody>${sharePacket.casting.map(agent=>`<tr><td><strong>${escapeHtml(agent.display_name)}</strong></td><td>${escapeHtml(agent.identity)}</td><td>${escapeHtml(agent.alias||agent.core_interest||'关键视角')}</td></tr>`).join('')}</tbody></table><div class="quote-grid">${(sharePacket.agentHighlights.length?sharePacket.agentHighlights:[{speaker:'暗房摘要',role:'系统提示',text:'本次未提取到可传播的暗房金句。'}]).map(item=>`<article class="quote-card"><div class="quote-top"><span class="quote-speaker">${escapeHtml(item.speaker)}</span><span class="quote-role">${escapeHtml(item.role||item.source||'')}</span></div><blockquote>${escapeHtml(item.text)}</blockquote></article>`).join('')}</div></section>`;
   const shareInsightsSection=`<section class="pdf-page share-page"><div class="section-tag">SHARE HIGHLIGHTS</div><h2>圆桌精选与核心结论</h2><div class="share-layout">${sharePacket.roundtableHighlights.length?`<div class="pdf-card"><h3>圆桌激辩精选片段</h3><div class="quote-grid compact">${sharePacket.roundtableHighlights.map(item=>`<article class="quote-card compact"><div class="quote-top"><span class="quote-speaker">${escapeHtml(item.speaker)}</span><span class="quote-role">${escapeHtml(item.source)}</span></div><blockquote>${escapeHtml(item.text)}</blockquote></article>`).join('')}</div></div>`:`<div class="pdf-card"><h3>圆桌激辩精选片段</h3><p>当前档位或本次输出未生成圆桌激辩，传播版仅保留局长结论。</p></div>`}<div class="pdf-card"><h3>局长报告核心结论</h3><div class="share-highlight-grid">${sharePacket.directorHighlights.map(item=>`<article class="share-highlight-card"><div class="share-highlight-title">${escapeHtml(item.title)}</div><p>${escapeHtml(item.text)}</p><div class="share-highlight-source">来自 ${escapeHtml(item.source)}</div></article>`).join('')}</div></div></div></section>`;
   const shareActionsSection=`<section class="pdf-page share-page"><div class="section-tag">SHARE ACTIONS</div><h2>3 条行动建议</h2><div class="share-note">传播版只保留最值得立刻转发给别人的 3 条建议，不再附带整段论证。</div><div class="share-action-list">${(sharePacket.actionSuggestions.length?sharePacket.actionSuggestions:[{title:'建议 1',text:'当前局长报告未提取到独立行动建议，可切换完整 PDF 查看完整论证。',source:'行动建议'}]).map(item=>`<article class="share-action-item"><div class="share-action-title">${escapeHtml(item.title)}</div><p>${escapeHtml(item.text)}</p><div class="share-highlight-source">来自 ${escapeHtml(item.source)}</div></article>`).join('')}</div></section>`;
@@ -2852,13 +3088,26 @@ async function exportPdf(evt,exportMode='full'){
   pdfButtons.forEach(btn=>{btn.disabled=true});
   if(trigger){trigger.textContent=busyLabel}
   try{
-    if(!window.html2pdf||!ExportUtils)throw new Error('PDF 导出组件未加载完成，请刷新页面后重试');
+    if(!ExportUtils)throw new Error('导出组件未加载完成，请刷新页面后重试');
     const exportState=getFormalExportState();
     const formalData=ExportUtils.collectFormalExportData(exportState);
     const traceLines=ExportUtils.collectTraceLines(exportState);
     const topicRaw=(formalData.topicLabel||$('tb').textContent||'推演局报告').replace(/^话题：/,'').trim();
     const topicFile=(sanitizeFileName(topicRaw).slice(0,30)||'报告');
     const fileName=`推演局-${topicFile}${exportMode==='share'?'-share':''}.pdf`;
+    const pdfHtml=buildPdfDocumentMarkup(formalData,traceLines,formatExportTime(),exportMode);
+    const hasCanvasPdf=Boolean((window.jspdf?.jsPDF||window.jsPDF)&&window.html2canvas)||Boolean(window.html2pdf);
+    if(!hasCanvasPdf){
+      const printWin=window.open('','_blank');
+      if(printWin){
+        printWin.document.write(`<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>${escapeHtml(fileName)}</title><style>@page{size:A4;margin:18mm}body{margin:0;background:#fff;display:flex;justify-content:center}</style></head><body>${pdfHtml}</body></html>`);
+        printWin.document.close();
+        setTimeout(()=>{printWin.focus();printWin.print()},200);
+        return;
+      }
+      window.print();
+      return;
+    }
     exportRoot=document.createElement('div');
     exportRoot.id='pdf-export-root';
     exportRoot.style.position='fixed';
@@ -2893,25 +3142,38 @@ function handleAbort(){if(abortSilently){abortSilently=false;finishRun();return}
 function reset(){if(ctl){abortSilently=true;ctl.abort()}clearRenderQueue();clearRoundtableRenderQueue();clearAgentRenderQueue();stopRoundtablePlayback();$('op').classList.remove('on');$('ab').classList.remove('on');$('lb2').classList.remove('active');$('ti').value='';$('mb').innerHTML='';$('pp').classList.remove('on');$('pl').innerHTML='';$('pb').classList.remove('folded');$('ptg').textContent='折叠';resetScenarioViews();md='';roundtableMd='';currentReportId='';readAgentIds=new Set();ss('ready','READY');clearInterval(ti);ctl=null;setRunState(false);clearRunTransition(true);closeDarkroom();updateReportChrome()}
 async function go(){
   const topic=$('ti').value.trim();if(!topic){$('ti').focus();return}
-  if(availableModelIds.size&&!availableModelIds.has($('ms').value)){
+  if(orchestrationMode!=='demo'&&availableModelIds.size&&!availableModelIds.has($('ms').value)){
     err(`当前中转站不支持模型：${$('ms').value}`);
     return;
   }
   ctl=new AbortController();
-  const req={topic,model:$('ms').value,depth:$('depth').value,audience:$('aud').value,agent_count:$('ac').value,active_modules:[...mods]};
+  resolvedOrchestrationMode=orchestrationMode;
+  const req={
+    topic,
+    model:$('ms').value,
+    depth:$('depth').value,
+    audience:$('aud').value,
+    agent_count:$('ac').value,
+    active_modules:[...mods],
+    orchestration_mode:orchestrationMode,
+  };
   currentReportId=buildReportId({topicLabel:`话题：${topic}`,modelName:req.model,depthLabel:depthLabels[req.depth]||req.depth},formatExportTime());
   markRunTransition('正在拆解冲突结构…');
   setRunState(true);
   ss('running','ANALYZING');$('lb2').classList.add('active');
   $('op').classList.add('on');$('tb').textContent='话题：'+topic;
   $('mb').innerHTML='';mods.forEach(m=>{const b=document.createElement('div');b.className='mbadge';b.textContent=moduleLabels[m]||m;$('mb').appendChild(b)});
-  resetScenarioViews();$('ab').classList.remove('on');$('pp').classList.add('on');$('pl').innerHTML='';addStep('请求已提交，准备进入推演流程');
+  resetScenarioViews();$('ab').classList.remove('on');$('pp').classList.add('on');$('pl').innerHTML='';addStep(`请求已提交（${modeLabels[orchestrationMode]||'多Agent编排'}），准备进入推演流程`);
   md='';roundtableMd='';t0=Date.now();
   updateReportChrome();
   ti=setInterval(()=>{$('om').textContent=((Date.now()-t0)/1000).toFixed(1)+'s'},100);
   try{
     const r=await fetch(`${API}/api/analyze`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(req),signal:ctl.signal});
-    if(!r.ok)throw new Error('服务器错误 '+r.status);
+    if(!r.ok){
+      let detail='服务器错误 '+r.status;
+      try{const errJson=await r.json();if(errJson?.detail)detail=String(errJson.detail)}catch(_e){}
+      throw new Error(detail);
+    }
     const reader=r.body.getReader();const dec=new TextDecoder();let buf='';
     while(true){
       const{done,value}=await reader.read();if(done)break;
@@ -2919,7 +3181,8 @@ async function go(){
       for(const l of lines){
         if(!l.startsWith('data: '))continue;
         try{const d=JSON.parse(l.slice(6));
-          if(d.type==='status'){addStep(d.label||d.content||'正在推演')}
+          if(d.type==='mode_resolved'){if(d.mode)resolvedOrchestrationMode=d.mode;updateReportChrome()}
+          else if(d.type==='status'){addStep(d.label||d.content||'正在推演')}
           else if(d.type==='casting'){renderCasting(d);addStep(`选角完成：已召唤 ${(d.agents||[]).length} 位 Agent`,'done')}
           else if(d.type==='agent_start'){const agent=upsertAgent(d.agent);if(agent){agent.status='已进入暗房';scheduleAgentRender(agent.id)}}
           else if(d.type==='agent_status'){const agent=agentStates.get(d.agent_id);if(agent){agent.status=d.label||agent.status;scheduleAgentRender(agent.id)}}
@@ -2932,6 +3195,7 @@ async function go(){
           else if(d.type==='roundtable_done'){addStep('圆桌激辩已完成','done')}
           else if(d.type==='director_start'){$('dpanel').classList.add('on');addStep(d.label||'局长正在整合所有材料')}
           else if(d.type==='director_chunk'){md+=d.content;$('dpanel').classList.add('on');scheduleRender(true)}
+          else if(d.type==='chunk'){md+=d.content||'';$('dpanel').classList.add('on');scheduleRender(true)}
           else if(d.type==='director_done'){addStep('局长整合报告已生成','done')}
           else if(d.type==='done'){done2()}
           else if(d.type==='error'){err(d.content)}
@@ -2970,6 +3234,8 @@ initProgressNavigation();
 registerRevealNodes();
 startPlaceholderCycle();
 renderAdvToggle(false);
+setOrchestrationMode('multi_agent');
+loadServerHealth();
 loadAvailableModels();
 updateReportChrome();
 </script>
